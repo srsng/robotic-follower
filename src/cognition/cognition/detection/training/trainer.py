@@ -7,10 +7,17 @@
 
 import torch
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from pathlib import Path
 from typing import Optional
+
+# 可选导入 TensorBoard
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    TENSORBOARD_AVAILABLE = True
+except ImportError:
+    TENSORBOARD_AVAILABLE = False
+    SummaryWriter = None
 
 from ..models.density_fusion_net import DensityFusionNet
 from ..modules.model_config import ModelConfig
@@ -67,7 +74,11 @@ class DetectionTrainer:
         self.evaluator = DetectionEvaluator(num_classes=config.num_classes)
 
         # TensorBoard
-        self.writer = SummaryWriter(log_dir=str(self.save_dir / "logs"))
+        if TENSORBOARD_AVAILABLE:
+            self.writer = SummaryWriter(log_dir=str(self.save_dir / "logs"))
+        else:
+            self.writer = None
+            print("TensorBoard 不可用，跳过日志记录")
 
         # 训练状态
         self.current_epoch = 0
@@ -209,11 +220,12 @@ class DetectionTrainer:
             val_metrics = self.validate(epoch)
 
             # TensorBoard日志
-            self.writer.add_scalar('Loss/train', train_loss, epoch)
-            self.writer.add_scalar('Loss/val', val_metrics['val_loss'], epoch)
-            self.writer.add_scalar('mAP_25', val_metrics['mAP_25'], epoch)
-            self.writer.add_scalar('mAP_50', val_metrics['mAP_50'], epoch)
-            self.writer.add_scalar('Learning_rate', self.optimizer.param_groups[0]['lr'], epoch)
+            if self.writer:
+                self.writer.add_scalar('Loss/train', train_loss, epoch)
+                self.writer.add_scalar('Loss/val', val_metrics['val_loss'], epoch)
+                self.writer.add_scalar('mAP_25', val_metrics['mAP_25'], epoch)
+                self.writer.add_scalar('mAP_50', val_metrics['mAP_50'], epoch)
+                self.writer.add_scalar('Learning_rate', self.optimizer.param_groups[0]['lr'], epoch)
 
             # 保存模型
             if (epoch + 1) % 20 == 0:
@@ -223,7 +235,8 @@ class DetectionTrainer:
             self.scheduler.step()
 
         print("训练完成！")
-        self.writer.close()
+        if self.writer:
+            self.writer.close()
 
     def save_checkpoint(self, epoch: int, metrics: dict):
         """

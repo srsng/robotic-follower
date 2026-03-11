@@ -21,8 +21,6 @@ def farthest_point_sample(xyz: torch.Tensor, npoint: int) -> torch.Tensor:
     """
     最远点采样算法 (Farthest Point Sampling, FPS)
 
-    使用 numpy/scipy 实现，比纯 Python 更高效
-
     Args:
         xyz: 点云坐标 (B, N, 3)
         npoint: 采样点数量
@@ -36,27 +34,40 @@ def farthest_point_sample(xyz: torch.Tensor, npoint: int) -> torch.Tensor:
     device = xyz.device
 
     if npoint >= N:
-        return torch.arange(N, device=device)
+        return torch.arange(N, device=device).unsqueeze(0).repeat(B, 1)
 
     # 转换为 numpy 数组
     xyz_np = xyz.cpu().numpy()
 
-    # 初始化
-    centroids = np.zeros(npoint, dtype=np.int32)
-    centroids[0] = np.random.randint(0, N)
-    distances = np.full(N, np.inf)
+    # 对每个 batch 进行 FPS
+    indices_list = []
+    for b in range(B):
+        # 初始化
+        points = xyz_np[b]
+        centroids = np.zeros(npoint, dtype=np.int64)
+        centroids[0] = np.random.randint(0, N)
+        distances = np.full(N, np.inf)
 
-    # 迭代选择剩余点
-    for i in range(1, npoint):
-        # 计算所有点到已选中心的距离
-        diff = xyz_np - xyz_np[centroids[:i]]
-        new_dist = np.sum(diff ** 2, axis=1)
-        distances = np.minimum(distances, new_dist)
+        # 更新第一个点到自身的距离
+        distances[centroids[0]] = 0
 
-        # 选择距离最远的点
-        centroids[i] = np.argmax(distances)
+        # 迭代选择剩余点
+        for i in range(1, npoint):
+            # 计算所有点到最新中心点的距离
+            diff = points - points[centroids[i-1]]
+            new_dist = np.sum(diff ** 2, axis=1)
 
-    return torch.from_numpy(centroids, device=device).unsqueeze(0)
+            # 更新最小距离
+            distances = np.minimum(distances, new_dist)
+
+            # 选择距离最远的点
+            centroids[i] = np.argmax(distances)
+            distances[centroids[i]] = 0  # 避免重复选择
+
+        indices_list.append(centroids)
+
+    indices_np = np.array(indices_list)
+    return torch.from_numpy(indices_np).to(device)
 
 
 def query_ball_point(
@@ -64,7 +75,7 @@ def query_ball_point(
     nsample: int,
     xyz: torch.Tensor,
     new_xyz: torch.Tensor
-) -> tuple:
+) -> torch.Tensor:
     """
     球查询 - 在半径内采样邻域点
 
@@ -75,36 +86,44 @@ def query_ball_point(
         new_xyz: 中心点坐标 (B, npoint, 3)
 
     Returns:
-        (index, grouped_xyz)
-            index: 邻域点索引 (B, npoint)
-            grouped_xyz: 邻域点坐标 (B, npoint, nsample)
+        index: 邻域点索引 (B, npoint, nsample)
     """
     device = xyz.device
     B, N, C = xyz.shape
+    npoint = new_xyz.shape[1]
+    radius2 = radius * radius
 
-    # 计算距离
-    diff = xyz - new_xyz.unsqueeze(2)
-    dist = torch.sum(diff ** 2, dim=-1)  # (B, N, npoint)
+    # 计算距离矩阵 (B, npoint, N)
+    diff = xyz.unsqueeze(1) - new_xyz.unsqueeze(2)  # (B, npoint, N, 3)
+    dist = torch.sum(diff ** 2, dim=-1)  # (B, npoint, N)
 
     # 找到半径内的点
-    mask = (dist <= radius * radius).float()
-    indices = torch.where(mask)[0].to(torch.long)
+    mask = (dist <= radius2)  # (B, npoint, N)
 
-    # 采样
-    if len(indices[0]) >= nsample:
-        sample_idx = torch.multinomial(
-            indices[0], nsample, replacement=False
-        )
-    else:
-        # 重复采样（如果点数不足）
-        sample_idx = torch.multinomial(
-            indices[0], nsample, replacement=True
-        )
+    # 构建索引
+    index = torch.zeros(B, npoint, nsample, dtype=torch.long, device=device)
+    for b in range(B):
+        for i in range(npoint):
+            # 获取当前中心点的邻域点索引
+            neighbors = torch.where(mask[b, i])[0]
 
-    index = sample_idx
-    grouped_xyz = xyz[torch.arange(B, device=device).unsqueeze(1), sample_idx]
+            # 采样
+            if len(neighbors) >= nsample:
+                # 随机采样
+                perm = torch.randperm(len(neighbors), device=device)[:nsample]
+                sample_idx = neighbors[perm]
+            else:
+                # 重复采样
+                if len(neighbors) > 0:
+                    indices = torch.cat([neighbors] * ((nsample // len(neighbors)) + 1))
+                    sample_idx = indices[:nsample]
+                else:
+                    # 如果没有邻域点，使用自身
+                    sample_idx = torch.full(nsample, i, dtype=torch.long, device=device)
 
-    return index, grouped_xyz
+            index[b, i] = sample_idx
+
+    return index
 
 
 def index_points(points: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
@@ -112,17 +131,28 @@ def index_points(points: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
     根据索引选取点
 
     Args:
-        points: 点云坐标 (B, N, 3) 或 (N, 3)
-        idx: 索引数组
+        points: 点云坐标 (B, N, C)
+        idx: 索引数组 (B, M) 或 (B, M, K)
 
     Returns:
-        选取的点坐标
+        选取的点坐标 (B, M, C) 或 (B, M, K, C)
     """
+    device = points.device
+
     if idx.ndim == 1:
         return points[idx]
     elif idx.ndim == 2:
         batch_size = idx.shape[0]
-        batch_range = torch.arange(batch_size).view(-1, 1, 1)
+        num_points = idx.shape[1]
+        batch_range = torch.arange(batch_size, device=device).view(-1, 1)
+        # (B, M, C)
+        return points[batch_range, idx]
+    elif idx.ndim == 3:
+        batch_size = idx.shape[0]
+        num_points = idx.shape[1]
+        num_neighbors = idx.shape[2]
+        batch_range = torch.arange(batch_size, device=device).view(-1, 1, 1)
+        # (B, M, K, C)
         return points[batch_range, idx]
     else:
         raise ValueError(f"不支持的索引形状: {idx.shape}")

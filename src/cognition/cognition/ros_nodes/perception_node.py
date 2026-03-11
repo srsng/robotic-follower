@@ -13,14 +13,11 @@ from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Vector3
 from std_msgs.msg import Header
 import numpy as np
-import cv2
 from pathlib import Path
 
-try:
-    # OpenCV到ROS2消息转换
-    from cv_bridge import CvBridge
-except ImportError:
-    CvBridge = None
+# 延迟导入 OpenCV 以避免 NumPy 版本兼容性问题
+cv2 = None
+CvBridge = None
 
 from cognition.point_cloud.io import depth_to_pointcloud, numpy_to_pointcloud2
 from cognition.point_cloud.filters import VoxelFilter, StatisticalFilter, PassthroughFilter
@@ -70,7 +67,7 @@ class PerceptionNode(Node):
 
         # 状态
         self.camera_info = None
-        self.cv_bridge = CvBridge() if CvBridge else None
+        self._cv_bridge = None
 
         # 初始化滤波器
         self.voxel_filter = VoxelFilter(voxel_size=0.02)
@@ -91,8 +88,16 @@ class PerceptionNode(Node):
 
         try:
             # 转换深度图像
-            if self.cv_bridge:
-                depth_image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding='16UC1')
+            if self._cv_bridge is None:
+                # 延迟加载 cv_bridge
+                try:
+                    from cv_bridge import CvBridge
+                    self._cv_bridge = CvBridge()
+                except ImportError:
+                    self.get_logger().warn("cv_bridge 未安装，使用手动转换")
+
+            if self._cv_bridge:
+                depth_image = self._cv_bridge.imgmsg_to_cv2(msg, desired_encoding='16UC1')
             else:
                 # 假设已经是对齐的uint16
                 depth_array = np.frombuffer(msg.data, dtype=np.uint16)
