@@ -1,0 +1,52 @@
+# 3D检测模型配置
+
+model:
+  name: "density_fusion_net"
+  num_classes: 18
+  input_points: 10000
+  feature_dim: 256
+  num_proposals: 256
+
+  # 网络结构
+  npoint_list: [2048, 512, 128, 1]
+  radius_list: [0.2, 0.4, 0.8, 1.2]
+  nsample_list: [64, 64, 64, 64]
+  mlp_list:
+    - [64, 64, 128]
+    - [128, 128, 256]
+    - [256, 256, 512]
+    - [512, 512, 1024]
+
+  # 密度融合配置
+  use_density_fusion: true
+
+  # CGNL配置
+  use_cgnl: true
+  cgnl_groups: 4
+
+# 训练配置
+training:
+  batch_size: 4
+  num_epochs: 180
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  lr_step: 60
+  lr_gamma: 0.1
+
+  # 损失权重
+  loss_weights:
+    vote: 1.0
+    objectness: 5.0
+    classification: 1.0
+    box: 1.0
+
+  # 数据增强
+  augmentation:
+    random_rotation: true
+    rotation_range: [-180, 180]
+    random_scale: true
+    scale_range: [0.8, 1.2]
+    jitter: 0.01
+    random_flip: true
+    point_dropout: true
+    dropout_prob: 0.1

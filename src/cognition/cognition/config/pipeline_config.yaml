@@ -1,0 +1,88 @@
+# 点云处理管道配置
+
+# ===========================================
+# 深度图像转点云配置
+# ===========================================
+depth_to_pointcloud:
+  # 深度参数
+  depth_scale: 0.001      # 深度缩放因子
+  invalid_depth: 0.0    # 无效深度值
+
+# ===========================================
+# 滤波器配置
+# ===========================================
+filters:
+  # 体素滤波（下采样）
+  voxel_filter:
+    enabled: true
+    voxel_size: 0.02          # 2cm 体素
+
+  # 统计滤波（去噪）
+  statistical_filter:
+    enabled: true
+    nb_neighbors: 20               # 统计邻域大小
+    std_ratio: 2.0                # 标准差倍数
+
+  # 半径滤波
+  radius_filter:
+    enabled: false
+    nb_points: 16                 # 最小邻点数
+    radius: 0.05                   # 5cm 半径
+
+  # 直通滤波（空间范围）
+  passthrough_filter:
+    enabled: true
+    axis: "z"                   # 滤波轴
+    min_limit: 0.0                # 最小值
+    max_limit: 3.0                # 最大值（3米）
+
+# ===========================================
+# 分割配置
+# ===========================================
+segmentation:
+  # 平面分割（桌面检测）
+  plane_segmentation:
+    enabled: false
+    distance_threshold: 0.02     # 2cm 距离阈值
+    ransac_n: 3                   # RANSAC迭代次数
+    num_iterations: 1000           # 最大迭代次数
+
+  # DBSCAN聚类
+  dbscan_clustering:
+    enabled: false
+    eps: 0.05                    # 邻域半径
+    min_samples: 10              # 最小样本数
+    use_gpu: true                # 是否使用GPU加速
+
+  # 欧氏聚类
+  euclidean_clustering:
+    enabled: false
+    cluster_tolerance: 0.1       # 5cm 聚类容差
+    min_cluster_size: 100         # 最小聚类点数
+    max_cluster_size: 25000       # 最大聚类点数
+
+# ===========================================
+# 密度计算配置
+# ===========================================
+density_calculation:
+  enabled: true
+  kernel_type: "gaussian"      # 高斯核
+  bandwidth: 0.5                  # 核带宽
+  k_neighbors: 50                # 加速计算的K近邻
+  normalization: "minmax"         # 归一化方式: minmax, zscore, none
+
+# ===========================================
+# 3D检测配置
+# ===========================================
+detection_3d:
+  enabled: false                 # 启用深度学习检测（需要训练好的模型）
+
+  # 模型路径
+  model_config_path: "config/model_config.yaml"
+  checkpoint_path: "checkpoints/best_model.pth"
+
+  # 推理参数
+  confidence_threshold: 0.5      # 置信度阈值
+
+  # 预计算密度
+  precompute_density: true
