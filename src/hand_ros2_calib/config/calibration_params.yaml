@@ -1,0 +1,85 @@
+# 手眼标定配置文件
+
+# 标定板配置
+calibration:
+  intrinsic:
+    # 标定板图案类型: chessboard, circles_symmetric, circles_asymmetric
+    pattern_type: "circles_asymmetric"
+
+    # 标定板尺寸
+    board_cols: 4
+    board_rows: 5
+    square_size_mm: 20.0  # 方格大小（毫米）
+
+    # 标定图像数量
+    num_images: 20
+
+    # 深度范围（米）
+    min_distance: 0.5
+    max_distance: 3.0
+
+  extrinsic:
+    # 手眼标定模式: EIH (Eye-in-Hand), ETH (Eye-to-Hand)
+    hand_eye_mode: "EIH"
+
+    # 标定位姿数量
+    num_poses: 15
+
+    # 最小旋转角度（度）
+    min_rotation: 20.0
+
+    # 最小平移距离（米）
+    min_translation: 0.05
+
+  validation:
+    # 验证图像数量
+    num_test_images: 5
+
+    # 最大误差阈值
+    max_pixel_error: 0.3        # 像素
+    max_physical_error_mm: 1.0  # 毫米
+
+# 相机配置
+camera:
+  # RealSense D435 话题
+  color_topic: "/d435/color/image_raw"
+  depth_topic: "/d435/depth/image_rect_raw"
+  camera_info_topic: "/d435/color/camera_info"
+  pointcloud_topic: "/d435/points"
+
+  # 是否使用仿真相机
+  use_simulation: false
+
+# 机器人配置
+robot:
+  # MoveIt 规划组
+  moveit_group: "arm"
+
+  # 坐标系
+  base_frame: "base_link"
+  end_effector_frame: "link6_1_1"
+
+  # 规划时间（秒）
+  planning_time: 10.0
+
+# 文件输出配置
+output:
+  # 输出目录
+  directory: "./calibration_results"
+
+  # 输出文件名
+  intrinsic_file: "calib_intrinsic.xml"
+  extrinsic_file: "calib_extrinsic.xml"
+  session_file: "calibration_session.xml"
+
+# 可视化配置
+visualization:
+  # 是否启用 RViz 可视化
+  enable_rviz: true
+
+  # 是否启用 OpenCV 图像显示
+  enable_opencv: true
+
+  # 图像显示窗口大小
+  display_width: 1280
+  display_height: 720

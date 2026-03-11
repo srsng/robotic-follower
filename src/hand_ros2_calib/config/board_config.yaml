@@ -1,0 +1,31 @@
+# 标定板配置文件
+
+# 标准非对称圆点标定板（4x5，间距 20mm）
+boards:
+  asym_circles_4x5_20mm:
+    type: "circles_asymmetric"
+    cols: 4
+    rows: 5
+    square_size_mm: 20.0
+    marker_length_mm: 50.0
+    description: "4x5 非对称圆点，间距 20mm"
+
+  # 棋盘格标定板（8x6，间距 30mm）
+  chessboard_8x6_30mm:
+    type: "chessboard"
+    cols: 8
+    rows: 6
+    square_size_mm: 30.0
+    description: "8x6 棋盘格，间距 30mm"
+
+  # 大尺寸非对称圆点（6x7，间距 30mm）
+  asym_circles_6x7_30mm:
+    type: "circles_asymmetric"
+    cols: 6
+    rows: 7
+    square_size_mm: 30.0
+    marker_length_mm: 60.0
+    description: "6x7 非对称圆点，间距 30mm"
+
+# 当前使用的标定板
+current_board: "asym_circles_4x5_20mm"
