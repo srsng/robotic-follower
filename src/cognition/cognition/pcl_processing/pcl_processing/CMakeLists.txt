@@ -39,7 +39,6 @@ link_directories(
 set(CORE_SRCS
     src/depth_to_pointcloud.cpp
     src/density_calculator.cpp
-    src/coordinate_transform.cpp
 )
 
 # 滤波器
@@ -54,11 +53,6 @@ set(FILTER_SRCS
 set(SEGMENTATION_SRCS
     src/segmentation/plane_segmentation.cpp
     src/segmentation/euclidean_clustering.cpp
-)
-
-# ROS 节点（可选）
-set(ROS_NODE_SRCS
-    src/ros_nodes/pointcloud_processor_node.cpp
 )
 
 # ===========================================
@@ -81,26 +75,27 @@ target_link_libraries(pcl_processing_core
 )
 
 # PCL 定义
-target_compile_definitions(pcl_processing_core与其他 PRIVATE
+target_compile_definitions(pcl_processing_core PRIVATE
     ${PCL_DEFINITIONS}
 )
-
-# ROS 节点库
-if(BUILD_ROS_NODES)
-    add_library(pcl_processing_ros STATIC
-        ${ROS_NODE_SRCS}
-    )
-    target_link_libraries(pcl_processing_ros
-        pcl_processing_core
-        ${catkin_LIBRARIES}
-    )
-endif()
 
 # ===========================================
 # 示例程序
 # ===========================================
 
 if(BUILD_EXAMPLES)
+    # 测试程序
+    add_executable(test_filters
+        examples/test_filters.cpp
+    )
+    target_link_libraries(test_filters
+        pcl_processing_core
+        ${OpenCV_LIBS}
+        ${PCL_LIBRARIES}
+        ${Boost_LIBRARIES}
+    )
+
+    # 传统处理管道示例
     add_executable(traditional_pipeline_demo
         examples/traditional_pipeline_demo.cpp
     )
@@ -134,54 +129,9 @@ install(DIRECTORY include/pcl_processing/
 
 # 安装示例
 if(BUILD_EXAMPLES)
-    install(TARGETS traditional_pipeline_demo
+    install(TARGETS test_filters traditional_pipeline_demo
         DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
     )
-endif()
-
-# ===========================================
-# Python 模块
-# ===========================================
-
-if(BUILD_PYTHON_BINDINGS)
-    find_package(pybind11 REQUIRED)
-    find_package(PythonLibs REQUIRED)
-
-    # Python 绑定（可以后续添加）
-    pybind11_add_module(pcl_processing_python
-        python/pcl_processing/pybind.cpp
-    )
-
-    target_link_libraries(pcl_processing_python PRIVATE
-        pcl_processing_core
-        ${OpenCV_LIBS}
-        ${PCL_LIBRARIES}
-    )
-
-    install(TARGETS pcl_processing_python
-        DESTINATION ${CATKIN_GLOBAL_PYTHON_DESTINATION}
-    )
-endif()
-
-# ===========================================
-# 测试（可选）
-# ===========================================
-
-enable_testing()
-if(BUILD_TESTING)
-    find_package(GTest REQUIRED)
-
-    add_executable(test_filters
-        tests/test_filters.cpp
-    )
-    target_link_libraries(test_filters
-        pcl_processing_core
-        GTest::gtest_main
-        GTest::gtest
-        GTest::gmock_main
-    )
-
-    add_test(NAME test_filters COMMAND test_filters)
 endif()
 
 # ===========================================
@@ -195,5 +145,4 @@ message(STATUS "  PCL version: ${PCL_VERSION}")
 message(STATUS "  Boost version: ${Boost_VERSION}")
 message(STATUS "  Build examples: ${BUILD_EXAMPLES}")
 message(STATUS "  Build Python bindings: ${BUILD_PYTHON_BINDINGS}")
-message(STATUS "  Build tests: ${BUILD_TESTING}")
 message(STATUS "")
