@@ -106,7 +106,7 @@ hand_eye_calibration/
 │   │   ├── __init__.py
 │   │   └── robot_interface.py     # 机器人接口
 │   ├── utils/
-│   │   ├── __.init__.py
+│   │   ├── __init__.py
 │   │   └── file_io.py            # 文件I/O
 │   └── ros_nodes/
 │       ├── __init__.py
@@ -330,20 +330,33 @@ class ExtrinsicCalibrator:
 
     def _rotation_to_quaternion(self, R: np.ndarray) -> np.ndarray:
         """旋转矩阵转四元数"""
-        import cv2
-        rvec, _ = cv2.Rodrigues(R)
-        return cv2.RQDecomp3x3(R)[0]  # 简化实现
+        # 使用scipy.spatial.transform.Rotation（社区成熟方案）
+        from scipy import spatial
+        quaternion = spatial.transform.Rotation.from_matrix(R).as_quat()
+        # scipy返回[x,y,z,w]，OpenCV期望[x,y,z,w]，顺序一致
+        return quaternion
 
     def _compute_calibration_error(self, R, t, A_motions, B_motions):
-        """计算标定误差"""
-        # 计算AX和XB的平均距离
+        """计算标定误差：验证AX=XB"""
         errors = []
         for (R_a, t_a), (R_b, t_b) in zip(A_motions, B_motions):
-            # AX = R_a * X + t_a
-            ax = R_a @ t + t_a
-            # XB = X * R_b + t_b
-            xb = R @ R_b @ t + R @ t_b + t
-            errors.append(np.linalg.norm(ax - xb))
+            # 构建4x4齐次变换矩阵
+            def make_homo(R, t):
+                M = np.eye(4)
+                M[:3, :3] = R
+                M[:3, 3] = t
+                return M
+
+            A = make_homo(R_a, t_a)
+            B = make_homo(R_b, t_b)
+            X = make_homo(R, t)
+
+            # 验证 AX ≈ XB
+            AX = A @ X
+            XB = X @ B
+            error = np.linalg.norm(AX - XB)
+            errors.append(error)
+
         return np.mean(errors)
 ```
 
@@ -521,6 +534,7 @@ def generate_launch_description():
 pip3 install opencv-python
 pip3 install numpy
 pip3 install pyyaml
+pip3 install scipy
 
 # ROS2依赖
 sudo apt install ros-humble-sensor-msgs
