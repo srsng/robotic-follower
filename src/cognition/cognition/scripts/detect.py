@@ -14,10 +14,8 @@
 """
 
 import argparse
-import yaml
 import numpy as np
 import torch
-import cv2
 from pathlib import Path
 import sys
 import json
@@ -25,12 +23,11 @@ import json
 # 添加父目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from detection.models.density_fusion_net import DensityFusionNet, Detection
-from detection.modules.model_config import ModelConfig
-from point_cloud.io import load_point_cloud, depth_to_pointcloud, numpy_to_pointcloud2
-from point_cloud.filters import VoxelFilter, StatisticalFilter
-from point_cloud.features import compute_density
-from point_cloud.segmentation import DBSCANClustering
+from cognition.detection.models.density_fusion_net import DensityFusionNet, Detection
+from cognition.detection.modules.model_config import ModelConfig
+from cognition.point_cloud.io import load_point_cloud
+from cognition.point_cloud.filters import VoxelFilter, StatisticalFilter
+from cognition.point_cloud.features import compute_density
 
 
 def parse_args():
@@ -41,13 +38,9 @@ def parse_args():
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='模型检查点路径')
     parser.add_argument('--input', type=str, required=True,
-                        help='输入文件：点云(.pcd/.ply/.bin) 或深度图(.png/.jpg)')
-    parser.add_argument('--camera-info', type=str, default=None,
-                        help='相机内参文件（深度图需要）')
+                        help='输入文件：点云(.pcd/.ply) 或 深度图(.png/.jpg)')
     parser.add_argument('--output', type=str, default='output.json',
                         help='输出JSON文件路径')
-    parser.add_argument('--depth-scale', type=float, default=0.001,
-                        help='深度图缩放因子')
     parser.add_argument('--threshold', type=float, default=0.5,
                         help='检测置信度阈值')
     parser.add_argument('--gpu', type=int, default=0,
@@ -58,17 +51,7 @@ def parse_args():
 
 
 class InferencePipeline:
-    """
-    完整的推理管线
-
-    包括：
-    - 深度图→点云转换
-    - 体素滤波
-    - 统计滤波
-    - 密度计算
-    - 模型推理
-    - 聚类分割
-    """
+    """完整的推理管线"""
 
     def __init__(self, config, checkpoint_path, device, threshold=0.5):
         self.config = config
@@ -87,9 +70,6 @@ class InferencePipeline:
             'norm_type': 'minmax'
         }
 
-        # 聚类算法（用于投票聚类）
-        self.clustering = DBSCANClustering(eps=0.1, min_samples=5, use_gpu=True)
-
         # 加载模型
         self._load_model(checkpoint_path)
 
@@ -105,17 +85,8 @@ class InferencePipeline:
         print(f"模型已加载: {checkpoint_path}")
         print(f"模型参数数量: {self.model.num_parameters():,}")
 
-    def load_input(self, input_path: str, camera_info_path: str = None) -> np.ndarray:
-        """
-        加载输入数据
-
-        Args:
-            input_path: 输入文件路径
-            camera_info_path: 相机内参文件（深度图需要）
-
-        Returns:
-            points: 点云坐标 (N, 3)
-        """
+    def load_input(self, input_path: str) -> np.ndarray:
+        """加载输入数据"""
         input_file = Path(input_path)
         suffix = input_file.suffix.lower()
 
@@ -124,68 +95,11 @@ class InferencePipeline:
             points = load_point_cloud(input_file)
             print(f"加载点云: {len(points)} 个点")
             return points
-
-        elif suffix in ['.png', '.jpg', '.jpeg']:
-            # 加载深度图并转换为点云
-            if camera_info_path is None:
-                raise ValueError("深度图需要相机内参文件")
-
-            depth_image = cv2.imread(input_file, cv2.IMREAD_UNCHANGED)
-
-            # 加载相机内参（简化版，需要根据实际格式调整）
-            camera_info = self._load_camera_info(camera_info_path)
-
-            # 深度图转点云
-            points, _ = depth_to_pointcloud(
-                depth_image,
-                camera_info,
-                depth_scale=self.config.get('depth_scale', 0.001)
-            )
-
-            print(f"从深度图生成点云: {len(points)} 个")
-            return points
-
-        elif suffix == '.bin':
-            # 加载二进制点云（ScanNet格式）
-            points = np.fromfile(input_file, dtype=np.float32)
-            points = points.reshape(-1, 4)[:, :3]  # (N, 4) -> (N, 3)
-            print(f"加载二进制点云: {len(points)} 个点")
-            return points
-
         else:
             raise ValueError(f"不支持的输入格式: {suffix}")
 
-    def _load_camera_info(self, camera_info_path: str) -> dict:
-        """
-        加载相机内参
-
-        Args:
-            camera_info_path: 相机内参文件路径
-
-        Returns:
-            camera_info: 相机内参字典
-        """
-        # 简化实现，实际需要根据文件格式解析
-        return {
-            'fx': 525.0,  # 默认值
-            'fy': 525.0,
-            'cx': 319.5,
-            'cy': 239.5,
-            'height': 480,
-            'width': 640
-        }
-
     def process_pointcloud(self, points: np.ndarray) -> tuple:
-        """
-        处理点云数据
-
-        Args:
-            points: 原始点云 (N, 3)
-
-        Returns:
-            filtered_points: 滤波后的点云
-            density: 密度信息
-        """
+        """处理点云数据"""
         print("1. 体素滤波...")
         filtered_points = self.voxel_filter.filter(points)
         print(f"   体素滤波后: {len(filtered_points)} 个点")
@@ -201,27 +115,13 @@ class InferencePipeline:
         return filtered_points, density
 
     def inference(self, points: np.ndarray, density: np.ndarray) -> list:
-        """
-        执行推理
-
-        Args:
-            points: 点云坐标 (N, 3)
-            density: 密度信息 (N,)
-
-        Returns:
-            detections: 检测结果列表
-        """
+        """执行推理"""
         print("4. 模型推理...")
 
-        # 上采样或下采样到模型输入大小
-        if len(points) < self.config.input_points:
-            # 重复采样
-            indices = np.random.choice(len(points), self.config.input_points, replace=True)
-            input_points = points[indices]
-            input_density = density[indices]
-        elif len(points) > self.config.input_points:
+        # 采样到模型输入大小
+        if len(points) > self.config.input_points:
             # 下采样（FPS）
-            from detection.data.augmentation import farthest_point_sample
+            from cognition.detection.data.augmentation import farthest_point_sample
             indices = farthest_point_sample(points, self.config.input_points)
             input_points = points[indices]
             input_density = density[indices]
@@ -240,30 +140,20 @@ class InferencePipeline:
         print(f"   模型输出形状: {predictions.shape}")
 
         # 转换为 numpy
-        predictions = predictions.cpu().numpy()[0]  # (num_proposals, output_dim)
+        predictions = predictions.cpu().numpy()[0]
 
         # 解析检测结果
         detections = self._parse_predictions(predictions, input_points, input_density)
 
-        print(f"5. 检测到 {len(detections)} 个物体")
+        print(f"5. 棣测到 {len(detections)} 个物体")
         return detections
 
     def _parse_predictions(self, predictions: np.ndarray, points: np.ndarray, density: np.ndarray) -> list:
-        """
-        解析模型预测
-
-        Args:
-            predictions: 模型输出 (num_proposals, output_dim)
-            points: 输入点云
-            density: 输入密度
-
-        Returns:
-            detections: 检测结果列表
-        """
+        """解析模型预测"""
         detections = []
 
-        # 假设输出格式：[center_x, center_y, center_z, size_x, size_y, size_z, heading, confidence, class_scores...]
         num_proposals = predictions.shape[0]
+        output_dim = predictions.shape[1]
 
         for i in range(num_proposals):
             pred = predictions[i]
@@ -272,19 +162,22 @@ class InferencePipeline:
             center = pred[0:3]
             size = pred[3:6]
             heading = pred[6]
-            confidence = pred[7]
+            confidence = pred[7] if output_dim > 7 else 0.5
 
             # 过滤低置信度检测
             if confidence < self.threshold:
                 continue
 
-            # 获取类别（取最大值的类别）
-            class_scores = pred[8:]
-            class_id = int(np.argmax(class_scores))
+            # 获取类别
+            if output_dim > 8:
+                class_scores = pred[8:]
+                class_id = int(np.argmax(class_scores))
+            else:
+                class_id = 0
 
             # 类别名称映射（SUN RGB-D 18类）
             class_names = [
-                'bed', 'table', 'sofa', 'chair', 'toilet', 'desk', 'dresser',
+                'bed', 'table', 'sofa', 'chair', 'toilet', 'dresser',
                 'night_stand', 'bookshelf', 'bathtub', 'refrigerator', 'tv_stand',
                 'curtain', 'washing_machine', 'box', 'stove', 'cushion', 'sink'
             ]
@@ -302,13 +195,7 @@ class InferencePipeline:
         return detections
 
     def save_results(self, detections: list, output_path: str):
-        """
-        保存检测结果
-
-        Args:
-            detections: 检测结果列表
-            output_path: 输出文件路径
-        """
+        """保存检测结果"""
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -322,7 +209,7 @@ class InferencePipeline:
                 'center': det.center.tolist(),
                 'size': det.size.tolist(),
                 'heading': det.heading,
-                'bbox_3d': [  # 3D边界框：center_x, center_y, center_z, size_x, size_y, size_z, heading
+                'bbox_3d': [  # 3D边界框
                     det.center[0], det.center[1], det.center[2],
                     det.size[0], det.size[1], det.size[2],
                     det.heading
@@ -339,13 +226,7 @@ class InferencePipeline:
         print(f"结果已保存到: {output_path}")
 
     def visualize(self, detections: list, points: np.ndarray):
-        """
-        可视化检测结果
-
-        Args:
-            detections: 检测结果列表
-            points: 原始点云
-        """
+        """可视化检测结果"""
         try:
             import open3d as o3d
 
@@ -358,12 +239,11 @@ class InferencePipeline:
             vis.add_geometry(pcd)
 
             # 为每个检测创建边界框
-            for i, det in enumerate(detections):
-                # 创建边界框
-                bbox = o3d.geometry.OrientedBoundingBox(
-                    o3d.utility.Vector3dVector(det.center.tolist()),
-                    o3d.utility.Vector3dVector(det.size.tolist())
-                )
+            for det in detections:
+                center = o3d.utility.Vector3dVector(det.center.tolist())
+                size = o3d.utility.Vector3dVector(det.size.tolist())
+
+                bbox = o3d.geometry.OrientedBoundingBox(center, size)
 
                 # 应用旋转
                 R = o3d.geometry.get_rotation_matrix_from_axis_angle(
@@ -372,7 +252,7 @@ class InferencePipeline:
                 )
                 bbox.rotate(R)
 
-                # 设置颜色（根据类别）
+                # 设置颜色
                 color = self._get_class_color(det.class_id)
                 bbox.color = o3d.utility.Vector3dVector(color)
 
@@ -394,22 +274,14 @@ class InferencePipeline:
         ]
         return colors[class_id % len(colors)]
 
-    def run(self, input_path: str, camera_info_path: str = None, output_path: str = 'output.json', visualize: bool = False):
-        """
-        运行完整推理流程
-
-        Args:
-            input_path: 输入文件路径
-            camera_info_path: 相机内参文件
-            output_path: 输出文件路径
-            visualize: 是否可视化
-        """
+    def run(self, input_path: str, output_path: str = 'output.json', visualize: bool = False):
+        """运行完整推理流程"""
         print("=" * 60)
         print("3D 目标检测推理")
         print("=" * 60)
 
         # 1. 加载输入
-        points = self.load_input(input_path, camera_info_path)
+        points = self.load_input(input_path)
 
         if len(points) == 0:
             print("错误: 输入点云为空")
@@ -438,8 +310,11 @@ def main():
     args = parse_args()
 
     # 设置设备
-    torch.cuda.set_device(args.gpu)
-    device = torch.device(f'cuda:{args.gpu}' if torch.cuda.is_available() else 'cpu')
+    if torch.cuda.is_available():
+        torch.cuda.set_device(args.gpu)
+        device = torch.device(f'cuda:{args.gpu}')
+    else:
+        device = torch.device('cpu')
     print(f"使用设备: {device}")
 
     # 加载配置
@@ -452,11 +327,10 @@ def main():
     # 运行推理
     pipeline.run(
         input_path=args.input,
-        camera_info_path=args.camera_info,
         output_path=args.output,
         visualize=args.visualize
     )
 
 
-if __name____ == '__main__':
+if __name__ == '__main__':
     main()
