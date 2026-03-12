@@ -2,84 +2,138 @@
 
 ## 概述
 
-机械臂执行模块负责接收运动控制模块下发的控制指令，通过机械臂驱动包完成指令解析与关节伺服驱动，控制机械臂各关节的精准运动，实现对目标物体的实时跟随。
+机械臂执行模块负责控制**六自由度**Dummy机械臂，通过 `ros2_control` 框架管理机械臂硬件接口，提供标准的硬件抽象层。本模块基于 ROS2 Humble 的 `ros2_control`、`controller_manager` 和 `joint_trajectory_controller` 实现，复用成熟的 ROS2 生态组件，避免重复造轮子。
+
+## 设计理念
+
+### 核心原则
+
+1. **使用 ROS2 标准组件**：使用 `ros2_control`、`controller_manager`、`joint_trajectory_controller` 等成熟组件
+2. **最小化自定义代码**：仅实现硬件接口（Hardware Interface），其他功能复用标准控制器
+3. **配置驱动**：通过 YAML 和 XACRO 配置文件控制行为
+4. **仿真兼容**：同一套接口支持真实硬件和 Gazebo 仿真
+
+### 架构对比
+
+| 组件     | 原设计（自行实现）  | 新设计（ros2_control）                  |
+| -------- | ------------------- | --------------------------------------- |
+| 硬件接口 | `BaseDriver`        | `hardware_interface::HardwareInterface` |
+| 轨迹跟踪 | `TrajectoryTracker` | `joint_trajectory_controller`           |
+| PID控制  | `PIDController`     | 内置控制器                              |
+| 状态发布 | 自定义节点          | `joint_state_broadcaster`               |
+| 控制循环 | 自定义定时器        | `controller_manager`                    |
+| 代码量   | ~800行              | ~150行（仅硬件接口）                    |
 
 ## 模块职责
 
-| 职责     | 描述                               |
-| -------- | ---------------------------------- |
-| 指令接收 | 接收运动控制模块下发的关节轨迹指令 |
-| 指令解析 | 解析关节轨迹、速度、加速度等参数   |
-| 轨迹跟踪 | 实时跟踪预规划轨迹                 |
-| 伺服驱动 | 控制各关节电机运动                 |
-| 状态反馈 | 发布关节状态和末端位姿             |
-| 异常处理 | 处理超时、碰撞、超限等异常情况     |
+| 职责     | 实现方式                                     |
+| -------- | -------------------------------------------- |
+| 硬件抽象 | 实现 `hardware_interface::HardwareInterface` |
+| 关节控制 | 使用 `joint_trajectory_controller`           |
+| 状态发布 | 使用 `joint_state_broadcaster`               |
+| 控制管理 | 使用 `controller_manager`                    |
+| 夹爪控制 | 提供专门的服务接口                           |
 
-## 执行流程
+## 系统架构
 
-```
-接收关节轨迹 → 轨迹平滑 → 实时插值 → 伺服驱动 → 状态反馈
-```
-
-+ 接收运动控制模块下发的关节轨迹指令；
-+ 解析轨迹参数（关节角度、时间戳、速度、加速度）；
-+ 对轨迹进行平滑处理（可选）；
-+ 实时插值计算当前关节目标角度；
-+ 下发至机械臂伺服驱动器；
-+ 反馈当前关节状态和末端位姿；
-+ 监控执行状态，处理异常情况。
-
-## 控制模式
-
-### 位置控制模式（主要模式）
-
-关节位置控制，适用于精准定位：
+### ros2_control 架构
 
 ```
-θ_target = θ_planned(t)
+┌─────────────────────────────────────────────────────────────────┐
+│                     应用层                                  │
+│  ┌──────────────┐      ┌──────────────┐                  │
+│  │ motion_control│      │   Rviz2      │                  │
+│  │    模块      │      │   可视化     │                  │
+│  └──────┬───────┘      └──────┬───────┘                  │
+│         │                     │                              │
+│         ▼                     ▼                              │
+│  ┌──────────────────────────────────────────────────┐         │
+│  │    /dummy_arm_controller/follow_joint_trajectory │         │
+│  │              (FollowJointTrajectory Action)       │         │
+│  └──────────────────────────────────────────────────┘         │
+└─────────────────────────────────┬─────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              控制层（controller_manager）                    │
+│  ┌──────────────────────────────────────────────────┐         │
+│  │   controller_manager (update_rate: 100Hz)       │         │
+│  └────────────────┬───────────────────────────────┘         │
+│                   │                                         │
+│     ┌─────────────┼─────────────┐                          │
+│     ▼             ▼             ▼                          │
+│  ┌────────┐  ┌────────┐  ┌────────┐                      │
+│  │ JTC    │  │ JSB    │  │  其他  │                      │
+│  │ (轨迹) │  │(状态)  │  │ 控制器 │                      │
+│  └────────┘  └────────┘  └────────┘                      │
+└─────────────────────────────────┬─────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│            硬件抽象层（Hardware Interface）                   │
+│  ┌──────────────────────────────────────────────────┐         │
+│  │   DummyHardwareInterface                         │         │
+│  │   - on_init(): 初始化                          │         │
+│  │   - read(): 读取硬件状态                        │         │
+│  │   - write(): 写入硬件命令                        │         │
+│  │   - on_configure(): 配置硬件                      │         │
+│  │   - on_activate(): 激活硬件                      │         │
+│  └──────────────────────────────────────────────────┘         │
+└─────────────────────────────────┬─────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   物理硬件                                   │
+│  ┌──────────────────────────────────────────────────┐         │
+│  │   Dummy/Dobot 六自由度机械臂 (USB 通信)        │
+│  │   - dummy_cli_tool (fibre 协议)               │
+│  │   - 关节1-6：旋转关节（6自由度）              │
+│  │   - 夹爪：独立控制（非运动学自由度）           │
+│  └──────────────────────────────────────────────────┘         │
+└─────────────────────────────────────────────────────────────────┘
+
+图例：
+- JTC: Joint Trajectory Controller (轨迹控制器)
+- JSB: Joint State Broadcaster (状态广播器)
 ```
 
-### 速度控制模式（可选）
+## ROS2 话题/Action/服务接口
 
-关节速度控制，适用于平滑运动：
+### Action 接口
 
-```
-ω_target = dθ_planned(t)/dt
-```
+| Action 名称                                     | Action 类型                          | 说明         |
+| ----------------------------------------------- | ------------------------------------ | ------------ |
+| `/dummy_arm_controller/follow_joint_trajectory` | `control_msgs/FollowJointTrajectory` | 执行关节轨迹 |
 
-### 混合控制模式
+### 话题接口
 
-结合位置和速度控制：
+#### 发布话题
 
-```
-θ_target = θ_planned(t)
-ω_target = dθ_planned(t)/dt
-```
+| 话题名称        | 消息类型                 | 来源 | 说明     |
+| --------------- | ------------------------ | ---- | -------- |
+| `/joint_states` | `sensor_msgs/JointState` | JSB  | 关节状态 |
 
-## ROS2话题接口
+#### 订阅话题
 
-### 订阅话题
-
-| 话题名称                         | 消息类型                          | 说明         |
-| -------------------------------- | --------------------------------- | ------------ |
-| `/motion_control/trajectory`     | `trajectory_msgs/JointTrajectory` | 关节运动轨迹 |
-| `/robot_command/joint_positions` | `std_msgs/Float64MultiArray`      | 关节位置指令 |
-
-### 发布话题
-
-| 话题名称              | 消息类型                    | 说明     |
-| --------------------- | --------------------------- | -------- |
-| `/robot/joint_states` | `sensor_msgs/JointState`    | 关节状态 |
-| `/robot/pose`         | `geometry_msgs/PoseStamped` | 末端位姿 |
+| 话题名称       | 消息类型 | 说明           |
+| -------------- | -------- | -------------- |
+| （无直接订阅） | -        | 通过控制器订阅 |
 
 ### 服务接口
 
-| 服务名称                     | 请求类型       | 响应类型        | 说明         |
-| ---------------------------- | -------------- | --------------- | ------------ |
-| `/robot_execution/enable`    | `EnableRobot`  | `EnableResult`  | 使能机械臂   |
-| `/robot_execution/disable`   | `DisableRobot` | `DisableResult` | 禁用机械臂   |
-| `/robot_execution/reset`     | `ResetRobot`   | `ResetResult`   | 复位机械臂   |
-| `/robot_execution/set_speed` | `SetSpeed`     | `SpeedResult`   | 设置运动速度 |
+| 服务名称                         | 请求类型           | 响应类型           | 说明         |
+| -------------------------------- | ------------------ | ------------------ | ------------ |
+| - `dummy_arm/enable`             | `std_srvs/SetBool` | `std_srvs/SetBool` | 使能机械臂   |
+| `dummy_arm/gripper_enable`       | `std_srvs/SetBool` | `std_srvs/SetBool` | 使能夹爪     |
+| `dummy_arm/gripper_open`         | `std_srvs/SetBool` | `std_srvs/SetBool` | 打开夹爪     |
+| `dummy_arm/gripper_close`        | `std_srvs/SetBool` | `std_srvs/SetBool` | 闭合夹爪     |
+| `dummy_arm/reset_current_limits` | `std_srvs/SetBool` | `std_srvs/SetBool` | 重置电流限制 |
+
+### 话题接口（夹爪控制）
+
+| 话题名称                   | 消息类型           | 说明                                |
+| -------------------------- | ------------------ | ----------------------------------- |
+| `/dummy_arm/gripper_angle` | `std_msgs/Float64` | 夹爪角度控制（-100=全开，100=全闭） |
 
 ## 目录结构
 
@@ -87,843 +141,818 @@
 robot_execution/
 ├── robot_execution/
 │   ├── __init__.py
-│   ├── drivers/
+│   ├── hardware/                    # 硬件接口实现
 │   │   ├── __init__.py
-│   │   ├── base_driver.py       # 驱动器基类
-│   │   ├── dummy_driver.py      # Dummy机械臂驱动
-│   │   └── can_driver.py        # CAN总线驱动（可选）
-│   ├── trajectory/
-│   │   ├── __init__.py
-│   │   ├── trajectory_tracker.py # 轨迹跟踪器
-│   │   ├── trajectory_smoother.py # 轨迹平滑器
-│   │   └── trajectory_interpolator.py # 轨迹插值器
-│   ├── controller/
-│   │   ├── __init__.py
-│   │   ├── joint_controller.py  # 关节控制器
-│   │   └── pid_controller.py    # PID控制器
-│   ├── state/
-│   │   ├── __init__.py
-│   │   └── robot_state.py      # 机械臂状态管理
-│   └── ros_nodes/
+│   │   └── dummy_hardware.py       # Dummy机械臂硬件接口
+│   └── ros_nodes/                  # 扩展节点
 │       ├── __init__.py
-│       └── execution_node.py     # 执行节点
-├── launch/
-│   └── execution.launch.py
+│       └── gripper_controller.py   # 夹爪控制器节点（可选）
 ├── config/
-│   ├── robot_config.yaml       # 机械臂配置
-│   └── controller_config.yaml  # 控制器配置
+│   ├── dummy-ros2.ros2_control.xacro  # ros2_control配置
+│   ├── dummy_controllers.yaml           # 控制器配置
+│   ├── initial_positions.yaml           # 初始位置配置
+│   └── joint_limits.yaml              # 关节限位（MoveIt）
+├── launch/
+│   ├── hardware_only.launch.py         # 仅启动硬件和控制器
+│   ├── full_system.launch.py          # 完整系统（含MoveIt）
+│   └── gazebo.launch.py              # Gazebo仿真启动
 ├── setup.py
 └── package.xml
 ```
 
-## 核心类设计
+## 核心实现
 
-### BaseDriver（基类）
-
-```python
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-
-@dataclass
-class JointConfig:
-    """关节配置"""
-    name: str
-    id: int
-    min_angle: float  # radians
-    max_angle: float  # radians
-    max_velocity: float  # rad/s
-    max_acceleration: float  # rad/s^2
-
-class BaseDriver(ABC):
-    """驱动器基类"""
-
-    def __init__(self, joint_configs: List[JointConfig]):
-        self.joint_configs = {j.name: j for j in joint_configs}
-        self.num_joints = len(joint_configs)
-
-    @abstractmethod
-    def connect(self) -> bool:
-        """连接驱动器"""
-        pass
-
-    @abstractmethod
-    def disconnect(self) -> bool:
-        """断开驱动器"""
-        pass
-
-    @abstractmethod
-    def enable(self) -> bool:
-        """使能驱动器"""
-        pass
-
-    @abstractmethod
-    def disable(self) -> bool:
-        """禁用驱动器"""
-        pass
-
-    @abstractmethod
-    def set_joint_positions(self, positions: dict) -> bool:
-        """
-        设置关节位置
-
-        Args:
-            positions: {joint_name: angle}
-
-        Returns:
-            bool: 设置是否成功
-        """
-        pass
-
-    @abstractmethod
-    def set_joint_velocities(self, velocities: dict) -> bool:
-        """
-        设置关节速度
-
-        Args:
-            velocities: {joint_name: velocity}
-
-        Returns:
-            bool: 设置是否成功
-        """
-        pass
-
-    @abstractmethod
-    def get_joint_states(self) -> dict:
-        """
-        获取关节状态
-
-        Returns:
-            dict: {joint_name: (position, velocity, effort)}
-        """
-        pass
-
-    @abstractmethod
-    def is_connected(self) -> bool:
-        """检查连接状态"""
-        pass
-
-    @abstractmethod
-    def is_enabled(self) -> bool:
-        """检查使能状态"""
-        pass
-```
-
-### DummyDriver
+### DummyHardwareInterface
 
 ```python
-import pyusb
-
-# Dummy/Dobot USB通信参数
-DUMMY_VID = 0x1209
-DUMMY_PIDS = [0x0D31, 0x0D32, 0x0D33]
-Baudrate = 115200
-
-class DummyDriver(BaseDriver):
-    """Dummy/Dobot六自由度机械臂驱动器"""
-
-    def __init__(self, joint_configs: List[JointConfig]):
-        super().__init__(joint_configs)
-        self.device = None
-        self.is_connected_flag = False
-        self.is_enabled_flag = False
-
-    def connect(self) -> bool:
-        """连接机械臂"""
-        try:
-            # 查找USB设备
-            device = pyusb.core.find(
-                idVendor=DUMMY_VID,
-                idProduct=DUMMY_PIDS
-            )
-
-            if device is None:
-                return False
-
-            # 打开设备
-            self.device = device
-            self.device.set_configuration()
-
-            self.is_connected_flag = True
-            return True
-
-        except Exception as e:
-            self.is_connected_flag = False
-            return False
-
-    def disconnect(self) -> bool:
-        """断开连接"""
-        if self.device:
-            self.device.close()
-            self.device = None
-            self.is_connected_flag = False
-        return True
-
-    def enable(self) -> bool:
-        """使能机械臂"""
-        if not self.is_connected_flag:
-            return False
-
-        # 发送使能指令
-        command = self._build_enable_command()
-        success = self._send_command(command)
-
-        if success:
-            self.is_enabled_flag = True
-
-        return success
-
-    def disable(self) -> bool:
-        """禁用机械臂"""
-        # 发送禁用指令
-        command = self._build_disable_command()
-        success = self._send_command(command)
-
-        if success:
-            self.is_enabled_flag = False
-
-        return success
-
-    def set_joint_positions(self, positions: dict) -> bool:
-        """
-        设置关节位置
-
-        Args:
-            positions: {joint_name: angle (radians)}
-        """
-        if not self.is_enabled_flag:
-            return False
-
-        # 转换为关节ID和角度
-        joint_data = []
-        for joint_name, angle in positions.items():
-            if joint_name not in self.joint_configs:
-                continue
-
-            config = self.joint_configs[joint_name]
-
-            # 角度限制检查
-            angle = max(config.min_angle, min(config.max_angle, angle))
-
-            # 转换为度（Dummy协议使用度）
-            angle_deg = math.degrees(angle)
-
-            joint_data.append((config.id, angle_deg))
-
-        # 发送位置指令
-        command = self._build_position_command(joint_data)
-        return self._send_command(command)
-
-    def set_joint_velocities(self, velocities: dict) -> bool:
-        """
-        设置关节速度
-
-        Args:
-            velocities: {joint_name: velocity (rad/s)}
-        """
-        if not self.is_enabled_flag:
-            return False
-
-        # 转换为关节ID和速度
-        joint_data = []
-        for joint_name, velocity in velocities.items():
-            if joint_name not in self.joint_configs:
-                continue
-
-            config = self.joint_configs[joint_name]
-
-        # 发送速度指令
-        command = self._build_velocity_command(joint_data)
-        return self._send_command(command)
-
-    def get_joint_states(self) -> dict:
-        """获取关节状态"""
-        if not self.is_enabled_flag:
-            return {}
-
-        # 发送查询指令
-        command = self._build_query_command()
-        self._send_command(command)
-
-        # 读取响应
-        response = self._read_response()
-        return self._parse_response(response)
-
-    def is_connected(self) -> bool:
-        """检查连接状态"""
-        return self.is_connected_flag
-
-    def is_enabled(self) -> bool:
-        """检查使能状态"""
-        return self.is_enabled_flag
-
-    def _send_command(self, command: bytes) -> bool:
-        """发送指令"""
-        try:
-            self.device.write(0x01, command, timeout=100)
-            return True
-        except Exception:
-            return False
-
-    def _read_response(self, timeout: int = 100) -> bytes:
-        """读取响应"""
-        try:
-            return self.device.read(0x81, 64, timeout=timeout)
-        except Exception:
-            return b''
-
-    def _build_position_command(self, joint_data: list) -> bytes:
-        """构建位置指令"""
-        # Dummy协议位置指令格式
-        # 头部(2字节) + 长度(1字节) + 命令码(1字节) + 关节数据 + 校验(1字节)
-        header = b'\xAA\x55'
-        cmd_code = b'\x01'  # 位置指令码
-
-        # 关节数据（每关节4字节：ID + 角度（度））
-        data = b''
-        for joint_id, angle_deg in joint_data:
-            data += bytes([joint_id])
-            data += struct.pack('<f', angle_deg)
-
-        length = len(data) + 1
-        checksum = self._compute_checksum(data)
-
-        return header + bytes([length]) + cmd_code + data + bytes([checksum])
-
-    def _compute_checksum(self, data: bytes) -> int:
-        """计算校验和"""
-        return sum(data) & 0xFF
-
-    def _parse_response(self, response: bytes) -> dict:
-        """解析响应"""
-        # Dummy协议响应解析
-        states = {}
-
-        if len(response) < 4:
-            return states
-
-        # 跳过头部和长度
-        data = response[4:]
-
-        # 解析关节状态
-        for joint_name, config in self.joint_configs.items():
-            if len(data) < 8:
-                break
-
-            # 读取位置和速度
-            position = struct.unpack('<f', data[0:4])[0]
-            velocity = struct.unpack('<f', data[4:8])[0]
-
-            # 转换为弧度
-            position_rad = math.radians(position)
-
-            states[joint_name] = (position_rad, velocity, 0.0)
-            data = data[8:]
-
-        return states
-```
-
-### TrajectoryTracker
-
-```python
-class TrajectoryTracker:
-    """轨迹跟踪器"""
-
-    def __init__(self, joint_names: List[str], sample_rate: float = 100.0):
-        """
-        初始化轨迹跟踪器
-
-        Args:
-            joint_names: 关节名称列表
-            sample_rate: 采样率（Hz）
-        """
-        self.joint_names = joint_names
-        self.sample_rate = sample_rate
-        self.dt = 1.0 / sample_rate
-
-        self.trajectory = None
-        self.current_index = 0
-        self.is_tracking = False
-
-    def load_trajectory(self, trajectory: JointTrajectory):
-        """
-        加载轨迹
-
-        Args:
-            trajectory: 关节轨迹消息
-        """
-        self.trajectory = trajectory
-        self.current_index = 0
-        self.is_tracking = False
-
-    def start(self):
-        """开始跟踪"""
-        if self.trajectory is None:
-            raise ValueError("轨迹未加载")
-
-        self.is_tracking = True
-        self.current_index = 0
-
-    def stop(self):
-        """停止跟踪"""
-        self.is_tracking = False
-
-    def get_current_command(self) -> dict:
-        """
-        获取当前时刻的关节指令
-
-        Returns:
-            dict: {joint_name: (position, velocity)}
-        """
-        if not self.is_tracking or self.trajectory is None:
-            return {}
-
-        if self.current_index >= len(self.trajectory.points):
-            self.is_tracking = False
-            return {}
-
-        # 获取当前轨迹点
-        point = self.trajectory.points[self.current_index]
-
-        # 构建指令字典
-        command = {}
-        for joint_name in self.joint_names:
-            if joint_name in point.positions:
-                idx = point.joint_names.index(joint_name)
-
-                position = point.positions[idx]
-                velocity = point.velocities[idx] if point.velocities else 0.0
-
-                command[joint_name] = (position, velocity)
-
-        return command
-
-    def advance(self):
-        """前进到下一个轨迹点"""
-        if self.is_tracking:
-            self.current_index += 1
-
-    def is_complete(self) -> bool:
-        """检查轨迹是否完成"""
-        return (self.trajectory is not None and
-                self.current_index >= len(self.trajectory.points))
-```
-
-### PIDController
-
-```python
-class PIDController:
-    """PID控制器"""
-
-    def __init__(self, kp: float, ki: float, kd: float,
-                 output_min: float = None, output_max: float = None):
-        """
-        初始化PID控制器
-
-        Args:
-            kp: 比例增益
-            ki: 积分增益
-            kd: 微分增益
-            output_min: 输出下限
-            output_max: 输出上限
-        """
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.output_min = output_min
-        self.output_max = output_max
-
-        self.reset()
-
-    def reset(self):
-        """重置控制器状态"""
-        self.integral = 0.0
-        self.prev_error = 0.0
-        self.prev_time = None
-
-    def update(self, setpoint: float, measured: float,
-               timestamp: float = None) -> float:
-        """
-        更新控制器
-
-        Args:
-            setpoint: 设定值
-            measured: 测量值
-            timestamp: 当前时间戳
-
-        Returns:
-            float: 控制输出
-        """
-        # 计算误差
-        error = setpoint - measured
-
-        # 计算时间增量
-        if timestamp is not None and self.prev_time is not None:
-            dt = timestamp - self.prev_time
-        else:
-            dt = 0.01  # 默认10ms
-
-        # 积分项
-        self.integral += error * dt
-
-        # 微分项
-        derivative = (error - self.prev_error) / dt if dt > 0 else 0.0
-
-        # PID输出
-        output = (self.kp * error +
-                  self.ki * self.integral +
-                  self.kd * derivative)
-
-        # 输出限幅
-        if self.output_min is not None:
-            output = max(self.output_min, output)
-        if self.output_max is not None:
-            output = min(self.output_max, output)
-
-        # 更新状态
-        self.prev_error = error
-        self.prev_time = timestamp
-
-        return output
-```
-
-### ExecutionNode
-
-```python
-class ExecutionNode(Node):
-    """机械臂执行ROS2节点"""
+"""
+Dummy机械臂的ros2_control硬件接口
+实现 HardwareInterface 接口，提供与真实硬件的通信
+"""
+import numpy as np
+import rclpy
+from rclpy.lifecycle import State
+from rclpy.lifecycle import TransitionCallbackReturn
+
+from control_msgs.action import FollowJointTrajectory
+from sensor_msgs.msg import JointState
+from std_srvs.srv import SetBool
+from std_msgs.msg import Float64
+
+# 导入 dummy_cli_tool 库（从 ros2_dummy_arm_810 引用）
+import dummy_controller.dummy_cli_tool.ref_tool as dummy_driver
+
+
+class DummyHardwareInterface:
+    """Dummy机械臂硬件接口"""
+
+    # 关节名称（6个自由度）
+    JOINT_NAMES = ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6']
+
+    # 位置校正（度）- 对齐真实机械臂零位
+    STATE_CORRECTION_DEG = np.array([0.0, -72.0, 90.0, 0.0, 0.0, 0.0])
+
+    # 指令方向调整
+    RAD_DIRECT_DIFF = np.array([1, 1, 1, 1, -1, -1])
+
+    # 体积偏移（弧度）
+    RAD_VOLUME_DIFF = np.array([0.0, -0.05, 1.57079, 0.0, 0.0, 0.0])
+
+    # 电流限制（A）
+    CURRENT_LIMITS = {
+        'joint_1': 1.5,
+        'joint_2': 3.0,
+        'joint_3': 3.0,
+        'joint_4': 2.0,
+        'joint_5': 1.5,
+        'joint_6': 1.2,
+        'hand': 0.5
+    }
 
     def __init__(self):
-        super().__init__('robot_execution_node')
+        # 状态和命令缓冲区
+        self.position_commands = [0.0] * 6
+        self.position_states = [0.0] * 6
+        self.velocity_states = [0.0] * 6
+        self.effort_states = [0.0] * 6
 
-        # 加载配置
-        self.robot_config = self._load_config('robot_config.yaml')
-        self.controller_config = self._load_config('controller_config.yaml')
+        # 硬件驱动
+        self.driver = None
+        self.is_connected = False
+        self.is_enabled = False
 
-        # 初始化关节配置
-        joint_configs = self._create_joint_configs()
+        # ROS2节点（用于发布关节状态和服务）
+        self.node = None
+        self.joint_state_pub = None
+        self.joint_state_timer = None
 
-        # 初始化驱动器
-        self.driver = self._create_driver(joint_configs)
-        if not self.driver.connect():
-            self.get_logger().error("驱动器连接失败")
-            return
+    # ========== Lifecycle Callbacks ==========
 
-        # 初始化轨迹跟踪器
-        self.tracker = TrajectoryTracker(
-            [j.name for j in joint_configs],
-            sample_rate=self.controller_config['control_rate']
+    def on_init(self, hardware_info):
+        """初始化回调"""
+        self.node = rclpy.create_node('dummy_hardware_interface')
+
+        # 导出命令接口
+        for i, joint in enumerate(self.JOINT_NAMES):
+            self.export_command_interface(f"{joint}/position",
+                                      self.position_commands[i])
+
+        # 导出状态接口
+        for i, joint in enumerate(self.JOINT_NAMES):
+            self.export_state_interface(f"{joint}/position",
+                                     self.position_states[i])
+            self.export_state_interface(f"{joint}/velocity",
+                                     self.velocity_states[i])
+
+        # 创建关节状态发布器
+        self.joint_state_pub = self.node.create_publisher(
+            JointState, 'joint_states', 10
         )
-
-        # 初始化PID控制器（可选）
-        self.pid_controllers = self._create_pid_controllers(joint_configs)
-
-        # 创建话题订阅者
-        self.trajectory_sub = self.create_subscription(
-            JointTrajectory,
-            '/motion_control/trajectory',
-            self.trajectory_callback,
-            10
-        )
-
-        # 创建话题发布者
-        self.joint_state_pub = self.create_publisher(
-            JointState,
-            '/robot/joint_states',
-            10
+        self.joint_state_timer = self.node.create_timer(
+            0.1,  # 10Hz
+            self._publish_joint_states
         )
 
         # 创建服务
-        self.enable_srv = self.create_service(
-            EnableRobot,
-            '/robot_execution/enable',
-            self.enable_callback
-        )
-        self.disable_srv = self.create_service(
-            DisableRobot,
-            '/robot_execution/disable',
-            self.disable_callback
-        )
-        self.reset_srv = self.create_service(
-            ResetRobot,
-            '/robot_execution/reset',
-            self.reset_callback
-        )
+        self._create_services()
 
-        # 创建控制定时器
-        self.control_timer = self.create_timer(
-            1.0 / self.controller_config['control_rate'],
-            self.control_timer_callback
-        )
+        return TransitionCallbackReturn.SUCCESS
 
-        self.get_logger().info("机械臂执行节点已启动")
+    def on_configure(self, previous_state):
+        """配置回调：连接硬件"""
+        try:
+            self.driver = dummy_driver.find_any()
+            if self.driver is None:
+                self.node.get_logger().error("未找到Dummy机械臂")
+                return TransitionCallbackReturn.ERROR
 
-    def _create_joint_configs(self) -> List[JointConfig]:
-        """创建关节配置"""
-        configs = []
-        for joint_name, params in self.robot_config['joints'].items():
-            config = JointConfig(
-                name=joint_name,
-                id=params['id'],
-                min_angle=params['min_angle'],
-                max_angle=params['max_angle'],
-                max_velocity=params['max_velocity'],
-                max_acceleration=params['max_acceleration']
+            self.is_connected = True
+            self.node.get_logger().info("Dummy机械臂连接成功")
+            return TransitionCallbackReturn.SUCCESS
+
+        except Exception as e:
+            self.node.get_logger().error(f"硬件连接失败: {e}")
+            return TransitionCallbackReturn.ERROR
+
+    def on_activate(self, previous_state):
+        """激活回调：使能机械臂"""
+        if not self.is_connected:
+            return TransitionCallbackReturn.ERROR
+
+        try:
+            self.driver.robot.set_enable(1)
+            self.driver.robot.set_command_mode(0)
+            self._setup_current_limits()
+            self._setup_gripper()
+
+            self.is_enabled = True
+            self.node.get_logger().info("机械臂已使能")
+            return TransitionCallbackReturn.SUCCESS
+
+        except Exception as e:
+            self.node.get_logger().error(f"使能失败: {e}")
+            return TransitionCallbackReturn.ERROR
+
+    def on_deactivate(self, previous_state):
+        """去激活回调"""
+        if self.is_enabled:
+            self.driver.robot.set_enable(0)
+            self.is_enabled = False
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_cleanup(self, previous_state):
+        """清理回调"""
+        self.is_connected = False
+        self.driver = None
+        return TransitionCallbackReturn.SUCCESS
+
+    # ========== Hardware Interface ==========
+
+    def read(self, time, period):
+        """读取硬件状态（周期性调用）"""
+        if not self.is_connected or not self.is_enabled:
+            return
+
+        try:
+            # 从硬件读取关节角度（度）
+            angles_deg = np.array([
+                self.driver.robot.joint_1.angle,
+                self.driver.robot.joint_2.angle,
+                self.driver.robot.joint_3.angle,
+                self.driver.robot.joint_4.angle,
+                self.driver.robot.joint_5.angle,
+                self.driver.robot.joint_6.angle
+            ])
+
+            # 应用校正并转换为弧度
+            corrected_deg = angles_deg + self.STATE_CORRECTION_DEG
+            corrected_deg[5] = -corrected_deg[5]  # J6方向调整
+            corrected_deg[4] = -corrected_deg[4]  # J5方向调整
+
+            angles_rad = np.radians(corrected_deg)
+
+            # 更新状态缓冲区
+            for i in range(6):
+                self.position_states[i] = angles_rad[i]
+                self.velocity_states[i] = 0.0  # 可选：读取速度
+
+        except Exception as e:
+            self.node.get_logger().error(f"读取状态失败: {e}")
+
+    def write(self, time, period):
+        """写入硬件命令（周期性调用）"""
+        if not self.is_connected or not self.is_enabled:
+            return
+
+        try:
+            # 获取位置命令
+            target_rad = np.array(self.position_commands)
+
+            # 应用指令变换
+            corrected_rad = (target_rad + self.RAD_VOLUME_DIFF) * self.RAD_DIRECT_DIFF
+            target_deg = np.degrees(corrected_rad)
+
+            # 发送到硬件
+            self.driver.robot.move_j(
+                target_deg[0], target_deg[1], target_deg[2],
+                target_deg[3], target_deg[4], target_deg[5]
             )
-            configs.append(config)
-        return configs
 
-    def _create_driver(self, joint_configs: List[JointConfig]) -> BaseDriver:
-        """创建驱动器"""
-        driver_type = self.robot_config['driver_type']
+        except Exception as e:
+            self.node.get_logger().error(f"写入命令失败: {e}")
 
-        if driver_type == "dummy":
-            return DummyDriver(joint_configs)
-        else:
-            raise ValueError(f"Unsupported driver type: {driver_type}")
-
-    def _create_pid_controllers(self,
-                                 joint_configs: List[JointConfig]) -> dict:
-        """创建PID控制器"""
-        controllers = {}
-
-        for joint_name, config in self.robot_config['joints'].items():
-            if 'pid' in config:
-                params = config['pid']
-                controllers[joint_name] = PIDController(
-                    kp=params['kp'],
-                    ki=params['ki'],
-                    kd=params['kd']
-                )
-
-        return controllers
-
-    def trajectory_callback(self, msg: JointTrajectory):
-        """轨迹回调，加载新轨迹"""
-        self.tracker.load_trajectory(msg)
-        self.tracker.start()
-        self.get_logger().info(f"加载轨迹，包含{len(msg.points)}个点")
-
-    def control_timer_callback(self):
-        """控制定时器回调"""
-        if not self.tracker.is_tracking:
-            return
-
-        # 获取当前关节指令
-        command = self.tracker.get_current_command()
-
-        if not command:
-            return
-
-        # 执行控制
-        self._execute_control(command)
-
-        # 前进轨迹索引
-        self.tracker.advance()
-
-        # 检查轨迹是否完成
-        if self.tracker.is_complete():
-            self.get_logger().info("轨迹执行完成")
-
-        # 发布关节状态
-        self._publish_joint_states()
-
-    def _execute_control(self, command: dict):
-        """执行控制指令"""
-        # 使用位置控制
-        positions = {name: cmd[0] for name, cmd in command.items()}
-        success = self.driver.set_joint_positions(positions)
-
-        if not success:
-            self.get_logger().warn("设置关节位置失败")
+    # ========== Private Methods ==========
 
     def _publish_joint_states(self):
-        """发布关节状态"""
-        # 获取关节状态
-        states = self.driver.get_joint_states()
-
-        if not states:
-            return
-
-        # 构建消息
+        """发布关节状态到ROS话题"""
         msg = JointState()
-        msg.header.stamp = self.get_clock().now().to_msg()
-
-        msg.name = list(states.keys())
-        msg.position = [s[0] for s in states.values()]
-        msg.velocity = [s[1] for s in states.values()]
-        msg.effort = [s[2] for s in states.values()]
-
+        msg.header.stamp = self.node.get_clock().now().to_msg()
+        msg.name = self.JOINT_NAMES
+        msg.position = self.position_states
+        msg.velocity = self.velocity_states
+        msg.effort = [0.0] * 6
         self.joint_state_pub.publish(msg)
 
-    def enable_callback(self, request, response):
-        """使能服务回调"""
-        success = self.driver.enable()
-        response.success = success
+    def _create_services(self):
+        """创建ROS服务"""
+
+        # 使能服务
+        self.enable_srv = self.node.create_service(
+            SetBool, '/dummy_arm/enable', self._enable_callback
+        )
+
+        # 夹爪服务
+        self.gripper_enable_srv = self.node.create_service(
+            SetBool, '/dummy_arm/gripper_enable', self._gripper_enable_callback
+        )
+        self.gripper_open_srv = self.node.create_service(
+            SetBool, '/dummy_arm/gripper_open', self._gripper_open_callback
+        )
+        self.gripper_close_srv = self.node.create_service(
+            SetBool, '/dummy_arm/gripper_close', self._gripper_close_callback
+        )
+
+        # 夹爪角度订阅
+        self.gripper_angle_sub = self.node.create_subscription(
+            Float64, '/dummy_arm/gripper_angle',
+            self._gripper_angle_callback, 10
+        )
+
+    def _setup_current_limits(self):
+        """设置电流限制"""
+        try:
+            for joint_name, limit in self.CURRENT_LIMITS.items():
+                if joint_name == 'hand':
+                    if hasattr(self.driver.robot.hand, 'set_current_limit'):
+                        self.driver.robot.hand.set_current_limit(limit)
+                else:
+                    joint = getattr(self.driver.robot, joint_name)
+                    if hasattr(joint, 'set_current_limit'):
+                        joint.set_current_limit(limit)
+        except Exception as e:
+            self.node.get_logger().error(f"设置电流限制失败: {e}")
+
+    def _setup_gripper(self):
+        """初始化夹爪"""
+        try:
+            if hasattr(self.driver.robot, 'hand'):
+                self.driver.robot.hand.set_enable(True)
+                self.driver.robot.hand.set_angle_with_speed_limit(-100.0)
+        except Exception as e:
+            self.node.get_logger().error(f"夹爪初始化失败: {e}")
+
+    # ========== Service Callbacks ==========
+
+    def _enable_callback(self, request, response):
+        """使能/去使能服务回调"""
+        try:
+            if request.data:
+                self.driver.robot.set_enable(1)
+                self.driver.robot.set_command_mode(0)
+                self._setup_current_limits()
+                self.is_enabled = True
+                response.success = True
+                response.message = "机械臂已使能"
+            else:
+                self.driver.robot.set_enable(0)
+                self.is_enabled = False
+                response.success = True
+                response.message = "机械臂已去使能"
+        except Exception as e:
+            response.success = False
+            response.message = str(e)
         return response
 
-    def disable_callback(self, request, response):
-        """禁用服务回调"""
-        success = self.driver.disable()
-        response.success = success
+    def _gripper_enable_callback(self, request, response):
+        """夹爪使能回调"""
+        try:
+            if hasattr(self.driver.robot, 'hand'):
+                self.driver.robot.hand.set_enable(request.data)
+                response.success = True
+                response.message = "夹爪已使能" if request.data else "夹爪已去使能"
+            else:
+                response.success = False
+                response.message = "未检测到夹爪"
+        except Exception as e:
+            response.success = False
+            response.message = str(e)
         return response
 
-    def reset_callback(self, request, response):
-        """复位服务回调"""
-        # 移动到初始位置
-        initial_positions = self.robot_config['initial_positions']
-        success = self.driver.set_joint_positions(initial_positions)
-        response.success = success
+    def _gripper_open_callback(self, request, response):
+        """打开夹爪"""
+        try:
+            if hasattr(self.driver.robot, 'hand'):
+                self.driver.robot.hand.close()  # CLI中close是打开
+                response.success = True
+                response.message = "夹爪已打开"
+            else:
+                response.success = False
+                response.message = "未检测到夹爪"
+        except Exception as e:
+            response.success = False
+            response.message = str(e)
         return response
+
+    def _gripper_close_callback(self, request, response):
+        """闭合夹爪"""
+        try:
+            if hasattr(self.driver.robot, 'hand'):
+                self.driver.robot.hand.open()  # CLI中open是闭合
+                response.success = True
+                response.message = "夹爪已闭合"
+            else:
+                response.success = False
+                response.message = "未检测到夹爪"
+        except Exception as e:
+            response.success = False
+            response.message = str(e)
+        return response
+
+    def _gripper_angle_callback(self, msg):
+        """夹爪角度控制"""
+        try:
+            angle = max(-100, min(100, msg.data))
+            if hasattr(self.driver.robot, 'hand'):
+                self.driver.robot.hand.set_angle_with_speed_limit(angle)
+        except Exception as e:
+            self.node.get_logger().error(f"夹爪角度控制失败: {e}")
 ```
 
 ## 配置文件
 
-### robot_config.yaml
+### dummy-ros2.ros2_control.xacro
 
-```yaml
-driver_type: "dummy"
+```xml
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <xacro:macro name="dummy_ros2_control" params="name initial_positions_file">
+        <xacro:property name="initial_positions"
+                      value="${xacro.load_yaml(initial_positions_file)['initial_positions']}"/>
 
-joints:
-  joint_1:
-    id: 1
-    min_angle: -3.14159    # -180 degrees
-    max_angle: 3.14159     # 180 degrees
-    max_velocity: 1.57       # 90 deg/s
-    max_acceleration: 3.14    # 180 deg/s^2
-  joint_2:
-    id: 2
-    min_angle: -1.5708     # -90 degrees
-    max_angle: 1.5708      # 90 degrees
-    max_velocity: 1.57
-    max_acceleration: 3.14
-  joint_3:
-    id: 3
-    min_angle: -3.14159
-    max_angle: 3.14159
-    max_velocity: 1.57
-    max_acceleration: 3.14
-  joint_4:
-    id: 4
-    min_angle: -3.14159
-    max_angle: 3.14159
-    max_velocity: 2.09       # 120 deg/s
-    max_acceleration: 4.18
-  joint_5:
-    id: 5
-    min_angle: -2.35619     # -135 degrees
-    max_angle: 2.35619      # 135 degrees
-    max_velocity: 2.09
-    max_acceleration: 4.18
-  joint_6:
-    id: 6
-    min_angle: -3.14159
-    max_angle: 3.14159
-    max_velocity: 2.09
-    max_acceleration: 4.18
+        <ros2_control name="${name}" type="system">
+            <hardware>
+                <!-- 真实硬件：使用自定义接口 -->
+                <plugin>robot_execution.hardware.DummyHardwareInterface</plugin>
+            </hardware>
 
-initial_positions:
-  joint_1: 0.0
-  joint_2: 0.0
-  joint_3: 0.0
-  joint_4: 0.0
-  joint_5: 0.0
-  joint_6: 0.0
+            <!-- 6个旋转关节 -->
+            <joint name="joint1">
+                <command_interface name="position">
+                    <param name="min">-2.967</param>
+                    <param name="max">2.967</param>
+                </command_interface>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['joint1']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
 
-usb:
-  vendor_id: 0x1209
-  product_ids: [0x0D31, 0x0D32, 0x0D33]
-  timeout: 100  # ms
+            <joint name="joint2">
+                <command_interface name="position">
+                    <param name="min">-1.309</param>
+                    <param name="max">1.571</param>
+                </command_interface>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['joint2']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <joint name="joint3">
+                <command_interface name="position">
+                    <param name="min">-1.571</param>
+                    <param name="max">1.571</param>
+                </command_interface>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['joint3']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <joint name="joint4">
+                <command_interface name="position">
+                    <param name="min">-3.14</param>
+                    <param name="max">3.14</param>
+                </command_interface>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['joint4']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <joint name="joint5">
+                <command_interface name="position">
+                    <param name="min">-1.571</param>
+                    <param name="max">1.571</param>
+                </command_interface>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['joint5']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <joint name="joint6">
+                <command_interface name="position">
+                    <param name="min">-3.14</param>
+                    <param name="max">3.14</param>
+                </command_interface>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['joint6']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+        </ros2_control>
+    </xacro:macro>
+</robot>
 ```
 
-### controller_config.yaml
+### dummy_controllers.yaml
 
 ```yaml
-control_mode: "position"  # "position" or "velocity" or "hybrid"
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # 控制频率
 
-control_rate: 100  # Hz
+    # 关节状态广播器
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
 
-trajectory_tracking:
-  interpolation: "linear"  # "linear" or "cubic"
-  lookahead_points: 2
-  position_tolerance: 0.01  # radians
-  velocity_tolerance: 0.1  # rad/s
+    # 关节轨迹控制器
+    dummy_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
 
-safety:
-  enable_collision_detection: true
-  enable_joint_limit_check: true
-  enable_velocity_limit: true
-  emergency_stop_timeout: 2.0  # seconds
+# 关节轨迹控制器配置
+dummy_arm_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
+      - joint6
 
-pid:  # optional, for position control with velocity feedback
-  joint_1:
-    kp: 10.0
-    ki: 0.1
-    kd: 0.5
-  joint_2:
-    kp: 10.0
-    ki: 0.1
-    kd: 0.5
+    command_interfaces:
+      - position
+
+    state_interfaces:
+      - position
+      - velocity
+
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.6
+      joint1:
+        trajectory: 0.1
+        goal: 0.1
+      joint2:
+        trajectory: 0.1
+        goal: 0.1
+      joint3:
+        trajectory: 0.1
+        goal: 0.1
+      joint4:
+        trajectory: 0.1
+        goal: 0.1
+      joint5:
+        trajectory: 0.1
+        goal: 0.1
+      joint6:
+        trajectory: 0.1
+        goal: 0.1
+
+# 关节状态广播器配置
+joint_state_broadcaster:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
+      - joint6
+    interfaces:
+      - position
+      - velocity
+```
+
+### dummy-ros2.srdf（MoveIt语义配置）
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="dummy-ros2">
+    <!-- 6自由度机械臂组 -->
+    <group name="dummy_arm">
+        <chain base_link="base_link" tip_link="link6_1_1"/>
+    </group>
+
+    <!-- 预定义位姿 -->
+    <group_state name="home" group="dummy_arm">
+        <joint name="joint1" value="0"/>
+        <joint name="joint2" value="0"/>
+        <joint name="joint3" value="0"/>
+        <joint name="joint4" value="0"/>
+        <joint name="joint5" value="0"/>
+        <joint name="joint6" value="0"/>
+    </group_state>
+
+    <!-- 虚拟关节：连接world和base_link -->
+    <virtual_joint name="virtual_joint" type="fixed"
+                     parent_frame="world" child_link="base_link"/>
+
+    <!-- 禁用相邻连杆的碰撞检测 -->
+    <disable_collisions link1="base_link" link2="link1_1_1" reason="Adjacent"/>
+    <disable_collisions link1="link1_1_1" link2="link2_1_1" reason="Adjacent"/>
+    <disable_collisions link1="link2_1_1" link2="link3_1_1" reason="Adjacent"/>
+    <disable_collisions link1="link4_1_1" link2="link5_1_1" reason="Adjacent"/>
+    <disable_collisions link1="link5_1_1" link2="link6_1_1" reason="Adjacent"/>
+</robot>
+```
+### dummy-ros2.urdf.xacro（机器人描述）
+
+```xml
+<?xml version="1.0"?><robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="dummy-ros2">
+    <!-- 引入基础机器人描述 -->
+    <xacro:include filename="$(find robot_execution)/urdf/dummy-ros2.xacro" />
+
+    <!-- 引入ros2_control配置 -->
+    <xacro:include filename="dummy-ros2.ros2_control.xacro" />
+
+    <!-- 实例化ros2_control -->
+    <xacro:dummy_ros2_control name="DummySystem"
+                                initial_positions_file="$(find robot_execution)/config/initial_positions.yaml"/>
+
+</robot>
+```
+
+
+### initial_positions.yaml
+
+```yaml
+initial_positions:
+  joint1: 0.0
+  joint2: 0.0
+  joint3: 0.0
+  joint4: 0.0
+  joint5: 0.0
+  joint6: 0.0
+```
+
+### joint_limits.yaml（MoveIt使用）
+
+```yaml
+# MoveIt 关节限位配置
+default_velocity_scaling_factor: 0.1
+default_acceleration_scaling_factor: 0.1
+
+joint_limits:
+  joint1:
+    has_velocity_limits: true
+    max_velocity: 3.15
+    has_acceleration_limits: false
+    max_acceleration: 0
+  joint2:
+    has_velocity_limits: true
+    max_velocity: 3.15
+    has_acceleration_limits: false
+    max_acceleration: 0
+  joint3:
+    has_velocity_limits: true
+    max_velocity: 3.15
+    has_acceleration_limits: false
+    max_acceleration: 0
+  joint4:
+    has_velocity_limits: true
+    max_velocity: 3.15
+    has_acceleration_limits: false
+    max_acceleration: 0
+  joint5:
+    has_velocity_limits: true
+    max_velocity: 3.15
+    has_acceleration_limits: false
+    max_acceleration: 0
+  joint6:
+    has_velocity_limits: true
+    max_velocity: 3.15
+    has_acceleration_limits: false
+    max_acceleration: 0
 ```
 
 ## 启动文件
 
-### execution.launch.py
+### hardware_only.launch.py
 
 ```python
+"""仅启动硬件接口和控制器"""
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
-from launch.substitutions import PathJoinSubstitution
+from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
+from launch.actions import DeclareLaunchArgument
+
 
 def generate_launch_description():
+    # 参数
     pkg_share = get_package_share_directory('robot_execution')
 
+    # 机器人描述
+    robot_description_content = Command([
+        PathJoinSubstitution(['xacro']),
+        PathJoinSubstitution([pkg_share, 'config', 'dummy-ros2.ros2_control.xacro']),
+        ' name:=DummySystem',
+        ' initial_positions_file:=',
+        PathJoinSubstitution([pkg_share, 'config', 'initial_positions.yaml'])
+    ])
+
     return LaunchDescription([
+        # Static TF
         Node(
-            package='robot_execution',
-            executable='execution_node',
-            name='robot_execution_node',
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_transform_publisher',
+            arguments=['0', '0', '0', '0', '0', '0', 'world', 'base_link']
+        ),
+
+        # Robot State Publisher
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            parameters=[{'robot_description': robot_description_content}]
+        ),
+
+        # Controller Manager
+        Node(
+            package='controller_manager',
+            executable='ros2_control_node',
             parameters=[
-                PathJoinSubstitution([pkg_share, 'config', 'robot_config.yaml']),
-                PathJoinSubstitution([pkg_share, 'config', 'controller_config.yaml'])
+                {'robot_description': robot_description_content}
             ],
-            output='screen'
-        )
+            remappings=[
+                ('/joint_states', '/joint_states')
+            ]
+        ),
+
+        # Joint State Broadcaster
+        Node(
+            package='controller_manager',
+            executable='spawner',
+            arguments=['joint_state_broadcaster', '--controller-manager', '/controller_manager']
+        ),
+
+        # Joint Trajectory Controller
+        Node(
+            package='controller_manager',
+            executable='spawner',
+            arguments=[
+                'dummy_arm_controller',
+                '--controller-manager', '/controller_manager',
+                '--controller-params-file',
+                PathJoinSubstitution([pkg_share, 'config', 'dummy_controllers.yaml'])
+            ]
+        ),
     ])
 ```
 
-## USB 设备权限
+### full_system.launch.py（含MoveIt）
 
-### udev 规则配置
+```python
+"""完整系统启动：硬件 + MoveIt + Rviz"""
+import os
+from launch import LaunchDescription
+from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+from moveit_configs_utils import MoveItConfigsBuilder
 
-创建 `/etc/udev/rules.d/99-robot-arm.rules`：
 
+def generate_launch_description():
+    # MoveIt配置
+    moveit_config = (
+        MoveItConfigsBuilder("dummy-ros2", package_name="robot_execution")
+        .robot_description(file_path="config/dummy-ros2.urdf.xacro")
+        .robot_description_semantic(file_path="config/dummy-ros2.srdf")
+        .trajectory_execution(file_path="config/dummy_controllers.yaml")
+        .joint_limits(file_path="config/joint_limits.yaml")
+        .to_moveit_configs()
+    )
+
+    # Rviz配置
+    rviz_config_file = os.path.join(
+        get_package_share_directory("robot_execution"),
+        "config",
+        "moveit.rviz"
+    )
+
+    return LaunchDescription([
+        # Hardware Interface + Controllers
+        # ... (同hardware_only.launch.py)
+
+        # MoveGroup Node
+        Node(
+            package="moveit_ros_move_group",
+            executable="move_group",
+            parameters=[moveit_config.to_dict()],
+            arguments=["--ros-args", "--log-level", "info"]
+        ),
+
+        # Rviz2
+        Node(
+            package="rviz2",
+            executable="rviz2",
+            name="rviz2",
+            arguments=["-d", rviz_config_file],
+            parameters=[
+                moveit_config.robot_description,
+                moveit_config.robot_description_semantic,
+                moveit_config.robot_description_kinematics,
+                moveit_config.planning_pipelines,
+                moveit_config.joint_limits,
+            ]
+        ),
+    ])
 ```
-# Dummy/Dobot 机械臂 USB 设备权限
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0D31", MODE="0666"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0D32", MODE="0666"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0D33", MODE="0666"
+
+## 依赖安装
+
+### ROS2依赖
+
+```bash
+# ros2_control 核心组件
+sudo apt install ros-humble-ros2-control
+sudo apt install ros-humble-controller-manager
+sudo apt install ros-humble-hardware-interface
+sudo apt install ros-humble-controller-interface
+
+# 标准控制器
+sudo apt install ros-humble-joint-state-broadcaster
+sudo apt install ros-humble-joint-trajectory-controller
+sudo apt install ros-humble-forward-command-controller
+
+# 控制消息
+sudo apt install ros-humble-control-msgs
+sudo apt install ros-humble-trajectory-msgs
+
+# MoveIt2
+sudo apt install ros-humble-moveit
+sudo apt install ros-humble-moveit-ros-planning-interface
+sudo apt install ros-humble-moveit-planners-ompl
+sudo apt install ros-humble-moveit-runtime
+sudo apt install ros-humble-moveit-servo
 ```
 
-重新加载规则：
+### Python依赖
 
+```bash
+# USB通信
+pip3 install pyusb
+pip3 install numpy
+```
+
+### USB设备权限
+
+```bash
+# 查找设备
+lsusb
+
+# 创建udev规则
+sudo nano /etc/udev/rules.d/99-dummy-arm.rules
+```
+
+添加内容（根据实际VID/PID修改）：
+```
+# Dummy/Dobot 机械臂
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0d31", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0d32", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0d33", MODE="0666"
+```
+
+重载规则：
 ```bash
 sudo udevadm control --reload-rules
 sudo udevadm trigger
-```
-
-## 安装依赖
-
-```bash
-# Python依赖
-pip3 install pyusb
-pip3 install numpy
-
-# ROS2依赖
-sudo apt install ros-humble-trajectory-msgs
-sudo apt install ros-humble-sensor-msgs
-sudo apt install ros-humble-geometry-msgs
-sudo apt install ros-humble-std-msgs
 ```
 
 ## 编译与运行
@@ -931,56 +960,146 @@ sudo apt install ros-humble-std-msgs
 ### 编译
 
 ```bash
-cd /home/srsnn/ros2_ws
+cd ~/ros2_ws
 colcon build --symlink-install --packages-select robot_execution
 source install/setup.bash
 ```
 
-### 运行执行节点
+### 运行硬件接口
 
 ```bash
-ros2 launch robot_execution execution.launch.py
+# 终端1：启动硬件和控制器
+ros2 launch robot_execution hardware_only.launch.py
+
+# 终端2：使能机械臂
+ros2 service call /dummy_arm/enable std_srvs/SetBool "{data: true}"
+```
+
+### 运行完整系统
+
+```bash
+# 终端1：启动硬件+MoveIt+Rviz
+ros2 launch robot_execution full_system.launch.py
+
+# 终端2：使能机械臂
+ros2 service call /dummy_arm/enable std_srvs/SetBool "{data: true}"
+```
+
+### 夹爪控制
+
+```bash
+# 打开夹爪
+ros2 service call /dummy_arm/gripper_open std_srvs/SetBool "{data: true}"
+
+# 闭合夹爪
+ros2 service call /dummy_arm/gripper_close std_srvs/SetBool "{data: true}"
+
+# 设置夹爪角度（话题方式）
+ros2 topic pub /dummy_arm/gripper_angle std_msgs/Float64 "data: 50.0"
 ```
 
 ### 查看关节状态
 
 ```bash
-ros2 topic echo /robot/joint_states
+ros2 topic echo /joint_states
 ```
 
-### 调用使能服务
+### 控制器管理
 
 ```bash
-ros2 service call /robot_execution/enable robot_execution/srv/EnableRobot
+# 列出所有控制器
+ros2 control list_controllers
+
+# 查看控制器状态
+ros2 control list_hardware_interfaces
+
+# 停止/启动控制器
+ros2 control unload_controller dummy_arm_controller
+ros2 control load_controller dummy_arm_controller robot_execution/config/dummy_controllers.yaml
 ```
 
-### 调用禁用服务
+## 与其他模块集成
 
-```bash
-ros2 service call /robot_execution/disable robot_execution/srv/DisableRobot
+### motion_control模块
+
+motion_control模块发布`FollowJointTrajectory` Action到`/dummy_arm_controller/follow_joint_trajectory`：
+
+```python
+# motion_control模块代码示例
+from control_msgs.action import FollowJointTrajectory
+from rclpy.action import ActionClient
+
+class MotionControlNode:
+    def __init__(self):
+        self.trajectory_client = ActionClient(
+            self, FollowJointTrajectory,
+            '/dummy_arm_controller/follow_joint_trajectory'
+        )
+
+    async def send_trajectory(self, trajectory):
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory = trajectory
+        await self.trajectory_client.send_goal_async(goal)
 ```
+
+### coordinate_transform模块
+
+coordinate_transform模块发布TF，robot_execution模块通过robot_state_publisher消费。
+
+### visualization_simulation模块
+
+visualization_simulation模块订阅`/joint_states`话题进行可视化。
 
 ## 性能指标
 
-| 指标     | 目标值  |
-| -------- | ------- |
-| 控制频率 | 100 Hz  |
-| 位置精度 | ±0.5°   |
-| 速度精度 | ±5%     |
-| 通信延迟 | < 10 ms |
-| 跟踪精度 | < 2 mm  |
+| 指标           | 目标值   | 实现方式                    |
+| -------------- | -------- | --------------------------- |
+| 控制频率       | 100 Hz   | controller_manager          |
+| 位置精度       | ±0.5°    | 硬件反馈                    |
+| 轨迹插值       | 时间线性 | joint_trajectory_controller |
+| 通信延迟       | <10ms    | USB批量传输                 |
+| Action更新频率 | 20 Hz    | action_monitor_rate         |
 
 ## 故障处理
 
-| 故障        | 原因                 | 解决方案                   |
-| ----------- | -------------------- | -------------------------- |
-| USB连接失败 | 设备未连接或权限不足 | 检查USB连接和udev规则      |
-| 通信超时    | 总线冲突或设备故障   | 重置连接，检查USB线缆      |
-| 关节超限    | 轨迹超出工作空间     | 限制目标位姿，增加安全约束 |
-| 运动不平滑  | PID参数不合适        | 调整PID参数                |
-| 碰撞检测    | 障碍物介入           | 紧急停止，重新规划         |
+| 故障         | 原因                   | 解决方案                 |
+| ------------ | ---------------------- | ------------------------ |
+| USB连接失败  | 设备未连接或权限不足   | 检查USB和udev规则        |
+| 控制器未加载 | 插件路径错误           | 检查plugin配置和编译路径 |
+| 轨迹执行超时 | 关节限位或工作空间问题 | 调整目标位姿和关节限位   |
+| 状态反馈不准 | 校正参数错误           | 调整STATE_CORRECTION_DEG |
+| 夹爪控制失败 | 夹爪未使能             | 调用gripper_enable服务   |
+
+## 仿真模式
+
+### Gazebo仿真启动
+
+```python
+# gazebo.launch.py
+def generate_launch_description():
+    # 使用Gazebo硬件插件
+    <hardware>
+        <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+    </hardware>
+    ...
+```
+
+```bash
+ros2 launch robot_execution gazebo.launch.py
+```
+
+## 优势总结
+
+| 方面         | 说明                         |
+| ------------ | ---------------------------- |
+| 代码复用     | 复用ros2_control和标准控制器 |
+| 维护简单     | 由社区维护，自动更新         |
+| 调试工具丰富 | rqt_controller_manager等     |
+| 仿真兼容     | 真实硬件和Gazebo使用同一接口 |
+| 标准接口     | 符合ROS2标准，易于集成       |
+| 实时性保障   | 内置实时调度支持             |
 
 ---
 
-**文档版本**: 1.0
+**文档版本**: 2.0
 **最后更新**: 2026-03-12
