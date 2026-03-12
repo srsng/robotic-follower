@@ -4,24 +4,24 @@
 
 ## 文档列表
 
-| 序号 | 模块 | 文档 | 说明 |
-|------|------|------|------|
-| 01 | 相机采集模块 | [01_camera_acquisition.md](./01_camera_acquisition.md) | 相机标定与数据采集 |
-| 02 | 感知模块 | [02_perception.md](./02_perception.md) | 点云处理与3D目标检测 |
-| 03 | 手眼标定模块 | [03_hand_eye_calibration.md](./03_hand_eye_calibration.md) | 手眼标定与坐标变换获取 |
-| 04 | 坐标变换模块 | [04_coordinate_transform.md](./04_coordinate_transform.md) | TF树管理与坐标转换 |
-| 05 | 运动控制模块 | [05_motion_control.md](./05_motion_control.md) | 轨迹规划与运动指令生成 |
-| 06 | 机械臂执行模块 | [06_robot_execution.md](./06_robot_execution.md) | 机械臂驱动与运动执行 |
-| 07 | 可视化与仿真模块 | [07_visualization_simulation.md](./07_visualization_simulation.md) | Rviz2可视化与Gazebo仿真 |
+| 序号 | 模块             | 文档                                                               | 说明                    |
+| ---- | ---------------- | ------------------------------------------------------------------ | ----------------------- |
+| 01   | 相机采集模块     | [01_camera_acquisition.md](./01_camera_acquisition.md)             | 相机标定与数据采集      |
+| 02   | 感知模块         | [02_perception.md](./02_perception.md)                             | 点云处理与3D目标检测    |
+| 03   | 手眼标定模块     | [03_hand_eye_calibration.md](./03_hand_eye_calibration.md)         | 手眼标定与坐标变换获取  |
+| 04   | 坐标变换模块     | [04_coordinate_transform.md](./04_coordinate_transform.md)         | TF树管理与坐标转换      |
+| 05   | 运动控制模块     | [05_motion_control.md](./05_motion_control.md)                     | 轨迹规划与运动指令生成  |
+| 06   | 机械臂执行模块   | [06_robot_execution.md](./06_robot_execution.md)                   | 机械臂驱动与运动执行    |
+| 07   | 可视化与仿真模块 | [07_visualization_simulation.md](./07_visualization_simulation.md) | Rviz2可视化与Gazebo仿真 |
 
 ## 系统依赖
 
 ### 硬件依赖
 
-| 设备 | 型号 | 接口 |
-|------|------|------|
-| 深度相机 | Intel RealSense D435 | USB 3.0 |
-| 机械臂 | Dummy/Dobot 六自由度机械臂 | USB 2.0/3.0 |
+| 设备     | 型号                       | 接口        |
+| -------- | -------------------------- | ----------- |
+| 深度相机 | Intel RealSense D435       | USB 3.0     |
+| 机械臂   | Dummy/Dobot 六自由度机械臂 | USB 2.0/3.0 |
 
 ### 软件依赖
 
@@ -94,7 +94,7 @@ sudo udevadm trigger
 ### 编译所有模块
 
 ```bash
-cd /home/srsnn/ros2_ws
+cd ~/ros2_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
@@ -148,34 +148,34 @@ ros2 launch visualization_simulation viz_gazebo_objects.launch.py
 
 ### 发布话题
 
-| 话题名称 | 消息类型 | 来源模块 |
-|----------|----------|----------|
-| `/camera/color/image_raw` | `sensor_msgs/Image` | 相机采集 |
-| `/camera/depth/image_rect_raw` | `sensor_msgs/Image` | 相机采集 |
-| `/camera/camera_info` | `sensor_msgs/CameraInfo` | 相机采集 |
-| `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2` | 感知 |
-| `/perception/detections` | `vision_msgs/Detection3DArray` | 感知 |
-| `/perception/obstacles` | `vision_msgs/BoundingBox3DArray` | 感知 |
-| `/motion_control/trajectory` | `trajectory_msgs/JointTrajectory` | 运动控制 |
-| `/robot/joint_states` | `rclpy/JointState` | 机械臂执行 |
-| `/robot/pose` | `geometry_msgs/PoseStamped` | 机械臂执行 |
-| `/viz/markers` | `visualization_msgs/MarkerArray` | 可视化与仿真 |
+| 话题名称                           | 消息类型                          | 来源模块     |
+| ---------------------------------- | --------------------------------- | ------------ |
+| `/camera/color/image_raw`          | `sensor_msgs/Image`               | 相机采集     |
+| `/camera/depth/image_rect_raw`     | `sensor_msgs/Image`               | 相机采集     |
+| `/camera/camera_info`              | `sensor_msgs/CameraInfo`          | 相机采集     |
+| `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2`         | 感知         |
+| `/perception/detections`           | `vision_msgs/Detection3DArray`    | 感知         |
+| `/perception/obstacles`            | `vision_msgs/BoundingBox3DArray`  | 感知         |
+| `/motion_control/trajectory`       | `trajectory_msgs/JointTrajectory` | 运动控制     |
+| `/robot/joint_states`              | `rclpy/JointState`                | 机械臂执行   |
+| `/robot/pose`                      | `geometry_msgs/PoseStamped`       | 机械臂执行   |
+| `/viz/markers`                     | `visualization_msgs/MarkerArray`  | 可视化与仿真 |
 
 ### 服务汇总
 
-| 服务名称 | 来源模块 |
-|----------|----------|
-| `/hand_eye_calibration/add_sample` | 手眼标定 |
-| `/hand_eye_calibration/execute` | 手眼标定 |
-| `/hand_eye_calibration/reset` | 手眼标定 |
-| `/coordinate_transform/transform_point` | 坐标变换 |
-| `/coordinate_transform/transform_pose` | 坐标变换 |
-| `/coordinate_transform/get_all_frames` | 坐标变换 |
-| `/motion_control/follow` | 运动控制 |
-| `/motion_control/stop` | 运动控制 |
-| `/robot_execution/enable` | 机械臂执行 |
-| `/robot_execution/disable` | 机械臂执行 |
-| `/robot_execution/reset` | 机械臂执行 |
+| 服务名称                                | 来源模块   |
+| --------------------------------------- | ---------- |
+| `/hand_eye_calibration/add_sample`      | 手眼标定   |
+| `/hand_eye_calibration/execute`         | 手眼标定   |
+| `/hand_eye_calibration/reset`           | 手眼标定   |
+| `/coordinate_transform/transform_point` | 坐标变换   |
+| `/coordinate_transform/transform_pose`  | 坐标变换   |
+| `/coordinate_transform/get_all_frames`  | 坐标变换   |
+| `/motion_control/follow`                | 运动控制   |
+| `/motion_control/stop`                  | 运动控制   |
+| `/robot_execution/enable`               | 机械臂执行 |
+| `/robot_execution/disable`              | 机械臂执行 |
+| `/robot_execution/reset`                | 机械臂执行 |
 
 ## TF树结构
 
@@ -227,80 +227,80 @@ ROS2话题 → Rviz2可视化 → 显示场景、检测、轨迹
 
 ## 性能指标
 
-| 指标类别 | 指标 | 目标值 |
-|----------|------|--------|
-| 相机采集 | 帧率 | ≥ 30 FPS |
-| 感知 | mAP@0.25 | > 0.85 |
-| 感知 | 推理速度 | > 5 FPS |
-| 坐标变换 | 查询延迟 | < 5 ms |
-| 运动控制 | 轨迹规划时间 | < 100 ms |
-| 机械臂执行 | 控制频率 | 100 Hz |
-| Rviz2可视化 | 帧率 | ≥ 30 FPS |
-| Gazebo仿真 | 仿真速度 | ≥ 1.0x |
-| 系统整体 | 端到端延迟 | < 200 ms |
+| 指标类别    | 指标         | 目标值   |
+| ----------- | ------------ | -------- |
+| 相机采集    | 帧率         | ≥ 30 FPS |
+| 感知        | mAP@0.25     | > 0.85   |
+| 感知        | 推理速度     | > 5 FPS  |
+| 坐标变换    | 查询延迟     | < 5 ms   |
+| 运动控制    | 轨迹规划时间 | < 100 ms |
+| 机械臂执行  | 控制频率     | 100 Hz   |
+| Rviz2可视化 | 帧率         | ≥ 30 FPS |
+| Gazebo仿真  | 仿真速度     | ≥ 1.0x   |
+| 系统整体    | 端到端延迟   | < 200 ms |
 
 ## 故障处理
 
 ### 通用故障
 
-| 故障现象 | 可能原因 | 解决方案 |
-|----------|----------|----------|
-| 节点无法启动 | ROS2环境未加载 | `source install/setup.bash` |
-| 模块编译失败 | 依赖缺失 | 检查package.xml并安装依赖 |
-| TF查询失败 | TF未发布或坐标系名称错误 | 检查TF树和坐标系名称 |
+| 故障现象     | 可能原因                 | 解决方案                    |
+| ------------ | ------------------------ | --------------------------- |
+| 节点无法启动 | ROS2环境未加载           | `source install/setup.bash` |
+| 模块编译失败 | 依赖缺失                 | 检查package.xml并安装依赖   |
+| TF查询失败   | TF未发布或坐标系名称错误 | 检查TF树和坐标系名称        |
 
 ### 相机模块
 
-| 故障现象 | 可能原因 | 解决方案 |
-|----------|----------|----------|
-| 相机未连接 | USB权限不足 | 配置udev规则 |
-| 深度图像全黑 | 相机未初始化 | 重启相机节点 |
-| 标定失败 | 标定板未检测到 | 调整光照和标定板位置 |
+| 故障现象     | 可能原因       | 解决方案             |
+| ------------ | -------------- | -------------------- |
+| 相机未连接   | USB权限不足    | 配置udev规则         |
+| 深度图像全黑 | 相机未初始化   | 重启相机节点         |
+| 标定失败     | 标定板未检测到 | 调整光照和标定板位置 |
 
 ### 感知模块
 
-| 故障现象 | 可能原因 | 解决方案 |
-|----------|----------|----------|
-| 检测失败 | 模型未加载 | 检查模型文件路径 |
-| GPU内存不足 | 点云过多 | 增加点云滤波 |
+| 故障现象    | 可能原因   | 解决方案         |
+| ----------- | ---------- | ---------------- |
+| 检测失败    | 模型未加载 | 检查模型文件路径 |
+| GPU内存不足 | 点云过多   | 增加点云滤波     |
 
 ### 手眼标定模块
 
-| 故障现象 | 可能原因 | 解决方案 |
-|----------|----------|----------|
-| 标定板未检测到 | 光照不足或`标定板不在视野内 | 调整光照和标定板位置 |
-| 标定误差大 | 样本数量不足或位姿分布不均 | 增加样本数量，确保包含旋转 |
-| 求解失败 | 位姿变换异常 | 重新采集样本，避免纯平移 |
+| 故障现象       | 可能原因                    | 解决方案                   |
+| -------------- | --------------------------- | -------------------------- |
+| 标定板未检测到 | 光照不足或`标定板不在视野内 | 调整光照和标定板位置       |
+| 标定误差大     | 样本数量不足或位姿分布不均  | 增加样本数量，确保包含旋转 |
+| 求解失败       | 位姿变换异常                | 重新采集样本，避免纯平移   |
 
 ### 坐标变换模块
 
-| 故障现象 | 可能原因 | 解决方案 |
-|----------|----------|----------|
-| TF查询失败 | TF未发布 | 检查TF树状态 |
+| 故障现象   | 可能原因     | 解决方案         |
+| ---------- | ------------ | ---------------- |
+| TF查询失败 | TF未发布     | 检查TF树状态     |
 | 坐标不准确 | 手眼标定误差 | 重新进行手眼标定 |
 
 ### 运动控制模块
 
-| 故障现象 | 可能原因 | 解决方案 |
-|----------|----------|----------|
+| 故障现象     | 可能原因               | 解决方案                     |
+| ------------ | ---------------------- | ---------------------------- |
 | 轨迹规划失败 | 障碍物过多或目标不可达 | 尝试放宽约束或移除部分障碍物 |
-| 目标不可达 | 超出工作空间 | 限制目标位姿在工作空间内 |
+| 目标不可达   | 超出工作空间           | 限制目标位姿在工作空间内     |
 
 ### 机械臂执行模块
 
-| 故障现象 | 可能原因 | 解决方案 |
-|----------|----------|----------|
-| 通信超时 | USB线缆问题 | 检查USB连接 |
+| 故障现象 | 可能原因     | 解决方案     |
+| -------- | ------------ | ------------ |
+| 通信超时 | USB线缆问题  | 检查USB连接  |
 | 关节超限 | 轨迹超出范围 | 限制目标位姿 |
 
 ### 可视化与仿真模块
 
-| 故障现象 | 可能原因 | 解决方案 |
-|----------|----------|----------|
-| Rviz2无法显示 | 话题未发布 | 检查节点运行状态 |
-| Gazebo加载失败 | URDF文件错误 | 验证URDF文件语法和依赖 |
-| 物体生成失败 | URDF路径错误 | 检查package.xml和模型路径 |
-| 标记不显示 | 坐标系不匹配 | 确保所有标记使用base_link坐标系 |
+| 故障现象       | 可能原因     | 解决方案                        |
+| -------------- | ------------ | ------------------------------- |
+| Rviz2无法显示  | 话题未发布   | 检查节点运行状态                |
+| Gazebo加载失败 | URDF文件错误 | 验证URDF文件语法和依赖          |
+| 物体生成失败   | URDF路径错误 | 检查package.xml和模型路径       |
+| 标记不显示     | 坐标系不匹配 | 确保所有标记使用base_link坐标系 |
 
 ## 扩展开发
 

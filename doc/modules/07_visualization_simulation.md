@@ -6,13 +6,13 @@
 
 ## 模块职责
 
-| 职责 | 描述 |
-|------|------|
-| Rviz 配置 | 配置 Rviz2 显示面板和可视化元素 |
-| Gazebo 仿真 | 提供虚拟机械臂和相机仿真环境 |
-| 场景管理 | 加载和管理仿真场景及物体 |
-| 标记发布 | 发布系统状态和调试信息的可视化标记 |
-| 数据记录 | 记录和回放仿真数据 |
+| 职责        | 描述                               |
+| ----------- | ---------------------------------- |
+| Rviz 配置   | 配置 Rviz2 显示面板和可视化元素    |
+| Gazebo 仿真 | 提供虚拟机械臂和相机仿真环境       |
+| 场景管理    | 加载和管理仿真场景及物体           |
+| 标记发布    | 发布系统状态和调试信息的可视化标记 |
+| 数据记录    | 记录和回放仿真数据                 |
 
 ## 运行模式
 
@@ -53,24 +53,24 @@ ros2 launch visualization_simulation viz_gazebo_objects.launch.py
 
 ### 订阅话题
 
-| 话题名称 | 消息类型 | 说明 |
-|----------|----------|------|
-| `/camera/color/image_raw` | `sensor_msgs/Image` | RGB图像 |
-| `/camera/depth/image_rect_raw` | `sensor_msgs/Image` | 深度图像 |
-| `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2` | 处理后点云 |
-| `/perception/detections`` | `vision_msgs/Detection3DArray` | 3D检测结果 |
-| `/perception/obstacles` | `vision_msgs/BoundingBox3DArray` | 障碍物包围盒 |
-| `/robot/joint_states` | `sensor_msgs/JointState` | 机械臂关节状态 |
-| `/robot/pose` | `geometry_msgs/PoseStamped` | 末端位姿 |
-| `/motion_control/trajectory` | `trajectory_msgs/JointTrajectory` | 关节运动轨迹 |
+| 话题名称                           | 消息类型                          | 说明           |
+| ---------------------------------- | --------------------------------- | -------------- |
+| `/camera/color/image_raw`          | `sensor_msgs/Image`               | RGB图像        |
+| `/camera/depth/image_rect_raw`     | `sensor_msgs/Image`               | 深度图像       |
+| `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2`         | 处理后点云     |
+| `/perception/detections``          | `vision_msgs/Detection3DArray`    | 3D检测结果     |
+| `/perception/obstacles`            | `vision_msgs/BoundingBox3DArray`  | 障碍物包围盒   |
+| `/robot/joint_states`              | `sensor_msgs/JointState`          | 机械臂关节状态 |
+| `/robot/pose`                      | `geometry_msgs/PoseStamped`       | 末端位姿       |
+| `/motion_control/trajectory`       | `trajectory_msgs/JointTrajectory` | 关节运动轨迹   |
 
 ### 发布话题
 
-| 话题名称 | 消息类型 | 说明 |
-|----------|----------|------|
-| `/viz/scene_info` | `visualization_msgs/Marker` | 场景信息标记 |
-| `/viz/trajectory` | `visualization_msgs/Marker` | 轨迹可视化 |
-| `/viz/obstacles` | `visualization_msgs/MarkerArray` | 障碍物可视化 |
+| 话题名称          | 消息类型                         | 说明         |
+| ----------------- | -------------------------------- | ------------ |
+| `/viz/scene_info` | `visualization_msgs/Marker`      | 场景信息标记 |
+| `/viz/trajectory` | `visualization_msgs/Marker`      | 轨迹可视化   |
+| `/viz/obstacles`  | `visualization_msgs/MarkerArray` | 障碍物可视化 |
 
 ## 目录结构
 
@@ -760,7 +760,7 @@ sudo apt install ros-humble-xacro
 ### 编译
 
 ```bash
-cd /home/srsnn/ros2_ws
+cd ~/ros2_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-select visualization_simulation
 source install/setup.bash
@@ -798,29 +798,29 @@ ros2 launch visualization_simulation viz_gazebo_objects.launch.py
 
 ```bash
 # 编辑配置文件
-nano /home/srsnn/ros2_ws/src/visualization_simulation/rviz/default.rviz
+nano ~/ros2_ws/src/visualization_simulation/rviz/default.rviz
 
 # 或使用 Python 脚本生成配置
-python3 /home/srsnn/ros2_ws/src/visualization_simulation/scripts/generate_rviz_config.py
+python3 ~/ros2_ws/src/visualization_simulation/scripts/generate_rviz_config.py
 ```
 
 ## 性能指标
 
-| 指标 | 目标值 |
-|------|--------|
-| Rviz2 帧率 | ≥ 30 FPS |
+| 指标            | 目标值         |
+| --------------- | -------------- |
+| Rviz2 帧率      | ≥ 30 FPS       |
 | Gazebo 仿真速度 | ≥ 实时（1.0x） |
-| Gazebo 物理精度 | < 1 mm |
-| 标记发布延迟 | < 10 ms |
+| Gazebo 物理精度 | < 1 mm         |
+| 标记发布延迟    | < 10 ms        |
 
 ## 故障处理
 
-| 故障 | 原因 | 解决方案 |
-|------|------|----------|
-| Rviz2 无法显示 | 话题未发布 | 检查话题列表和节点运行状态 |
-| Gazebo 加载失败 | UDF 文件错误 | 验证 URDF 文件语法和依赖 |
-| 物体生成失败 | UDF 路径错误 | 检查 package.xml 和模型路径 |
-| 标记不显示 | 坐标系不匹配 | 确保所有标记使用 base_link 坐标系 |
+| 故障            | 原因         | 解决方案                          |
+| --------------- | ------------ | --------------------------------- |
+| Rviz2 无法显示  | 话题未发布   | 检查话题列表和节点运行状态        |
+| Gazebo 加载失败 | UDF 文件错误 | 验证 URDF 文件语法和依赖          |
+| 物体生成失败    | UDF 路径错误 | 检查 package.xml 和模型路径       |
+| 标记不显示      | 坐标系不匹配 | 确保所有标记使用 base_link 坐标系 |
 
 ---
 

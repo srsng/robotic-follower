@@ -582,7 +582,7 @@ coordinate_frames:
   camera_optical_frame: "camera_depth_optical_frame"
 
 hand_eye_transform:
-  source_file: "/home/srsnn/ros2_ws/results/calibration.yaml"
+  source_file: "~/ros2_ws/results/calibration.yaml"
   auto_load: true
 
 transform_settings:
@@ -633,7 +633,7 @@ sudo apt install ros-humble-geometry-msgs
 ### 编译
 
 ```bash
-cd /home/srsnn/ros2_ws
+cd ~/ros2_ws
 colcon build --symlink-install --packages-select coordinate_transform
 source install/setup.bash
 ```

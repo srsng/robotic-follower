@@ -509,7 +509,7 @@ sudo apt install ros-humble-geometry-msgs
 ### 编译
 
 ```bash
-cd /home/srsnn/ros2_ws
+cd ~/ros2_ws
 colcon build --symlink-install --packages-select perception
 source install/setup.bash
 ```
@@ -517,7 +517,7 @@ source install/setup.bash
 ### 训练
 
 ```bash
-cd /home/srsnn/ros2_ws/src/perception
+cd ~/ros2_ws/src/perception
 python3 scripts/train.py --config config/model_config.yaml
 ```
 

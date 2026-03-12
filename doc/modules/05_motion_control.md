@@ -703,7 +703,7 @@ sudo apt install ros-humble-sensor-msgs
 ### 编译
 
 ```bash
-cd /home/srsnn/ros2_ws
+cd ~/ros2_ws
 colcon build --symlink-install --packages-select motion_control
 source install/setup.bash
 ```

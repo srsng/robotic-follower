@@ -389,7 +389,7 @@ sudo apt install ros-humble-camera-calibration
 ### 编译
 
 ```bash
-cd /home/srsnn/ros2_ws
+cd ~/ros2_ws
 colcon build --symlink-install --packages-select camera_acquisition
 source install/setup.bash
 ```

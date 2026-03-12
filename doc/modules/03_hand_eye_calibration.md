@@ -533,7 +533,7 @@ sudo apt install ros-humble-tf2-ros
 ### 编译
 
 ```bash
-cd /home/srsnn/ros2_ws
+cd ~/ros2_ws
 colcon build --symlink-install --packages-select hand_eye_calibration
 source install/setup.bash
 ```
