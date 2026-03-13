@@ -74,10 +74,10 @@ sudo udevadm trigger
 cd ~/ros2_ws/src
 
 # 创建新的 ROS2 Python 包
-ros2 pkg create --build-type ament_python package_name
+ros2 pkg create package_name --build-type ament_python [...options]
 
 # 或使用 C++ 包
-ros2 pkg create --build-type ament_cmake package_name
+ros2 pkg create package_name --build-type ament_cmake [...options]
 ```
 
 ### 2. 编译工作空间
@@ -145,6 +145,12 @@ ros2 param list
 # 查看节点日志
 ros2 node info /node_name
 ```
+
+## 技术选型规范
+
++ 优先使用python，其次才是C++
++ 优先使用社区成熟方案/库
++ 保证可用、稳定的前提下，优先使用复杂度较低的方案/库
 
 ## 编码规范
 
