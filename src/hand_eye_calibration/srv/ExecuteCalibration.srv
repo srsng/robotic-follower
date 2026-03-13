@@ -1,0 +1,8 @@
+bool force  # 强制执行（忽略最小样本数检查）
+---
+bool success
+float64 error
+float64[9] rotation  # 3x3 rotation matrix (row-major)
+float64[3] translation  # x, y, z
+float64[4] quaternion  # x, y, z, w
+string error_message

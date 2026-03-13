@@ -1,0 +1,25 @@
+hand_eye_calibration_node:
+  ros__parameters:
+    calibration:
+      board_type: "circles_asymmetric"
+      board_cols: 4
+      board_rows: 5
+      circle_diameter: 0.020
+      min_samples: 15
+      max_samples: 50
+
+    validation:
+      max_error: 0.01
+
+    output:
+      save_path: "results/calibration.yaml"
+      tf_parent_frame: "end_effector"
+      tf_child_frame: "camera_link"
+
+    robot:
+      base_frame: "base_link"
+      end_effector_frame: "end_effector"
+
+    camera:
+      color_topic: "/camera/color/image_raw"
+      camera_info_topic: "/camera/camera_info"

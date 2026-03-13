@@ -7,9 +7,10 @@
 
 import sys
 import os
+from pathlib import Path
 
 # MMDetection3D 路径
-MMD3D_PATH = os.path.expanduser('~/ws/py/mmdetection3d')
+MMD3D_PATH = = os.path.expanduser('~/ws/py/mmdetection3d')
 sys.path.insert(0, MMD3D_PATH)
 sys.path.insert(0, os.path.join(MMD3D_PATH, 'projects/cognition_fusion'))
 
@@ -75,7 +76,8 @@ class MMDet3DPerceptionNode(Node):
 
         # 状态
         self.camera_info = None
-        self._cv_bridge = None
+
+ self._cv_bridge = None
         self.inferencer = None
         self.inferencer_initialized = False
 
@@ -266,7 +268,7 @@ class MMDet3DPerceptionNode(Node):
                     num_detections = len(bboxes)
                     for i in range(num_detections):
                         bbox = bboxes[i]
-                        score = float(scores(scores[i]) if scores is not None else 0.5
+                        score = float(scores[i]) if scores is not None else 0.5
                         label = int(labels[i]) if labels is not None else 0
                         
                         if score < 0.05:  # 置信度过滤
@@ -319,7 +321,7 @@ class MMDet3DPerceptionNode(Node):
             (1.0, 1.0, 0.0),  # 黄色
             (1.0, 0.0, 1.0),  # 紫色
             (0.0, 1.0, 1.0),  # 青色
-            (1.0, 0.5, 0.0),  # 橙色
+            (1.0, 0.5, 0.0, 0.0),  # 橙色
             (0.5, 0.0, 1.0),  # 零色
         ]
         
