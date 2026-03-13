@@ -8,6 +8,26 @@
 
 为解决坐标变换复杂性和鲁棒性问题，采用基于ROS2 TF2树的坐标管理方案。
 
+### 与手眼标定模块的关系
+
+坐标变换模块与手眼标定模块是两个独立运行的模块：
+
+1. **手眼标定模块**（`hand_eye_calibration`）：
+   - 负责执行手眼标定流程，采集样本并求解AX=XB方程
+   - 标定完成后将结果保存到文件（如 `results/calibration.yaml`）
+   - 标定期间作为独立节点运行，标定完成后可以关闭
+
+2. **坐标变换模块**（`coordinate_transform`）：
+   - 在系统运行期间持续工作
+   - 启动时从配置文件读取手眼标定结果文件路径
+   - 如果配置了 `auto_load: true`，则自动加载手眼标定结果并发布为静态TF
+   - 后续所有坐标变换都依赖这个静态TF
+
+**优势**：
+- 标定和运行分离，避免标定过程影响正常运行
+- 可以离线进行标定，运行时直接加载结果
+- 标定结果可以复用，无需重复标定
+
 ## 模块职责
 
 | 职责     | 描述                             |
@@ -45,8 +65,12 @@ base_link (机器人基座)
 | TF                                       | 类型 | 来源                                |
 | ---------------------------------------- | ---- | ----------------------------------- |
 | base_link → link1 → ... → end_effector   | 动态 | 机械臂控制器发布（URDF + 关节状态） |
-| end_effector → camera_link               | 静态 | 手眼标定模块发布                    |
+| end_effector → camera_link               | 静态 | 坐标变换模块加载手眼标定结果后发布 |
 | camera_link → camera_depth_optical_frame | 静态 | 相机厂商提供（URDF中定义）          |
+
+**说明**：
+- `end_effector → camera_link` 由坐标变换模块从手眼标定结果文件（`results/calibration.yaml`）加载后作为静态TF发布
+- 手眼标定模块独立运行，完成标定后将结果保存到文件供坐标变换模块加载使用
 
 ## ROS2话题接口
 
@@ -60,9 +84,56 @@ base_link (机器人基座)
 
 | 服务名称                               | 请求类型         | 响应类型           | 说明           |
 | -------------------------------------- | ---------------- | ------------------ | -------------- |
-| `/coordinate_transform/transform`      | `TransformPoint` | `TransformedPoint` | 点坐标变换服务 |
-| `/coordinate_transform/transform_pose` | `TransformPose`  | `TransformedPose`  | 位姿变换服务   |
-| `/coordinate_transform/get_all_frames` | `GetFrames`      | `Frames`           | 获取所有坐标系 |
+| `/coordinate_transform/transform_point`| `TransformPoint` | `TransformedPoint` | 点坐标变换服务 |
+| `/coordinate_transform/transform_pose`  | `TransformPose`  | `TransformedPose`  | 位姿变换服务   |
+| `/coordinate_transform/get_all_frames`| `GetFrames`      | `Frames`           | 获取所有坐标系 |
+
+#### 服务消息定义
+
+**TransformPoint.srv**
+```
+# 像素坐标+深度 → 机器人基座坐标
+uint32 u              # 像素坐标x
+uint32 v              # 像素坐标y
+float64 depth         # 深度值（米）
+---
+bool success          # 是否成功
+float64 x             # 基座坐标系x
+float64 y             # 基座坐标系y
+float64 z             # 基座坐标系z
+string error_message  # 错误信息
+```
+
+**TransformedPoint.srv**
+```
+# 通用点坐标变换
+geometry_msgs/PointStamped point      # 源点（带frame_id）
+string target_frame                   # 目标坐标系
+---
+bool success                          # 是否成功
+geometry_msgs/PointStamped result    # 变换后点
+string error_message                 # 错误信息
+```
+
+**TransformPose.srv**
+```
+# 位姿变换
+geometry_msgs/PoseStamped pose       # 源位姿（带frame_id）
+string target_frame                  # 目标坐标系
+---
+bool success                         # 是否成功
+geometry_msgs/PoseStamped result     # 变换后位姿
+string error_message                # 错误信息
+```
+
+**GetFrames.srv**
+```
+# 获取所有坐标系
+---
+bool success        # 是否成功
+string[] frames     # 坐标系列表
+string error_message # 错误信息
+```
 
 ## 目录结构
 
@@ -221,6 +292,56 @@ class TFPublisher:
     def publish_dynamic_transform(self, transform: TransformStamped):
         """发布动态变换"""
         self.dynamic_broadcaster.sendTransform(transform)
+
+    def load_and_publish_hand_eye_transform(self, calibration_file: str,
+                                           parent_frame: str = "end_effector",
+                                           child_frame: str = "camera_link"):
+        """
+        从手眼标定结果文件加载并发布手眼变换
+
+        Args:
+            calibration_file: 标定结果文件路径
+            parent_frame: 父坐标系名称
+            child_frame: 子坐标系名称
+
+        Returns:
+            bool: 是否成功加载和发布
+        """
+        import yaml
+        import os
+
+        # 展开路径中的 ~
+        calibration_file = os.path.expanduser(calibration_file)
+
+        if not os.path.exists(calibration_file):
+            self.node.get_logger().error(
+                f"手眼标定文件不存在: {calibration_file}"
+            )
+            return False
+
+        try:
+            with open(calibration_file, 'r') as f:
+                calib_data = yaml.safe_load(f)
+
+            # 从标定结果中提取变换
+            translation = calib_data.get('translation_vector', [0.0, 0.0, 0.0])
+            quaternion = calib_data.get('quaternion', [0.0, 0.0, 0.0, 1.0])
+
+            # 发布静态TF
+            self.publish_static_transform(
+                parent_frame, child_frame, translation, quaternion
+            )
+
+            self.node.get_logger().info(
+                f"成功加载并发布手眼变换: {parent_frame} → {child_frame}"
+            )
+            return True
+
+        except Exception as e:
+            self.node.get_logger().error(
+                f"加载手眼标定文件失败: {e}"
+            )
+            return False
 ```
 
 ### CoordinateConverter
@@ -241,9 +362,10 @@ class CoordinateConverter:
     def set_camera_info(self, camera_info: CameraInfo):
         """设置相机内参"""
         self.camera_info = camera_info
+        self.node.get_logger().info("相机内参已设置")
 
-    def pixel_to_camera_optical(self(self, u: int, v: int,
-                                   depth: float) -> np.ndarray:
+    def pixel_to_camera_optical(self, u: int, v: int,
+                                depth: float) -> np.ndarray:
         """
         像素坐标 → 相机光学坐标
 
@@ -260,7 +382,10 @@ class CoordinateConverter:
             np.ndarray: [x, y, z]
         """
         if self.camera_info is None:
-            raise ValueError("相机内参未设置")
+            self.node.get_logger().warn(
+                "相机内参未设置，请等待相机信息..."
+            )
+            raise RuntimeError("相机内参未设置")
 
         fx = self.camera_info.k[0]
         fy = self.camera_info.k[4]
@@ -415,7 +540,7 @@ class PoseInterpolation:
 
         Args:
             q1: 起始四元数
-            q: 结束四元数
+            q2: 结束四元数
             alpha: 插值参数 [0, 1]
 
         Returns:
@@ -496,18 +621,30 @@ class TransformNode(Node):
         # 初始化TF管理器
         self.tf_manager = TFTreeManager(self)
 
+        # 初始化TF发布器
+        self.tf_publisher = TFPublisher(self)
+
+        # 加载手眼标定变换
+        if self.config.get('hand_eye_transform', {}).get('auto_load', False):
+            calib_file = self.config['hand_eye_transform'].get('source_file')
+            parent_frame = self.config['coordinate_frames'].get('end_effector_frame')
+            child_frame = self.config['coordinate_frames'].get('camera_link_frame')
+            self.tf_publisher.load_and_publish_hand_eye_transform(
+                calib_file, parent_frame, child_frame
+            )
+
         # 初始化坐标转换器
         self.converter = CoordinateConverter(
             self,
             self.tf_manager,
-            camera_frame=self.config['camera_frame'],
-            base_frame=self.config['base_frame']
+            camera_frame=self.config['coordinate_frames'].get('camera_optical_frame'),
+            base_frame=self.config['coordinate_frames'].get('base_frame')
         )
 
         # 订阅相机内参
         self.camera_info_sub = self.create_subscription(
             CameraInfo,
-            '/camera/camera_info',
+            self.config['camera'].get('camera_info_topic', '/camera/camera_info'),
             self.camera_info_callback,
             10
         )
@@ -522,6 +659,11 @@ class TransformNode(Node):
             TransformPose,
             'coordinate_transform/transform_pose',
             self.transform_pose_callback
+        )
+        self.get_frames_srv = self.create_service(
+            GetFrames,
+            'coordinate_transform/get_all_frames',
+            self.get_frames_callback
         )
 
         self.get_logger().info("坐标变换节点已启动")
@@ -568,6 +710,21 @@ class TransformNode(Node):
             response.error_message = str(e)
 
         return response
+
+    def get_frames_callback(self, request, response):
+        """获取所有坐标系服务回调"""
+        try:
+            frames_str = self.tf_manager.get_all_frames()
+            # 解析坐标系列表
+            import re
+            frames = re.findall(r'Frame: ([\w_-]+)', frames_str)
+            response.success = True
+            response.frames = frames
+        except Exception as e:
+            response.success = False
+            response.error_message = str(e)
+
+        return response
 ```
 
 ## 配置文件
@@ -589,6 +746,12 @@ transform_settings:
   buffer_duration: 10.0  # seconds
   timeout: 1.0  # seconds
   use_latest_time: false
+
+camera:
+  camera_info_topic: "/camera/camera_info"
+
+robot:
+  joint_state_topic: "/robot/joint_states"
 ```
 
 ## 启动文件
@@ -617,16 +780,63 @@ def generate_launch_description():
 
 ## 安装依赖
 
-```bash
-# Python依赖
-pip3 install numpy
+### Python依赖
 
-# ROS2依赖
+```bash
+pip3 install numpy
+pip3 install pyyaml
+```
+
+### ROS2系统依赖
+
+```bash
 sudo apt install ros-humble-tf2-ros
 sudo apt install ros-humble-tf2-geometry-msgs
 sudo apt install ros-humble-sensor-msgs
 sudo apt install ros-humble-geometry-msgs
 ```
+
+### 编译设置
+
+由于本模块包含自定义服务消息（`.srv`文件），需要正确的`CMakeLists.txt`配置。
+
+`CMakeLists.txt`内容：
+```cmake
+cmake_minimum_required(VERSION 3.8)
+project(coordinate_transform)
+
+# C++编译选项
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# 查找依赖
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+
+# 生成服务消息
+rosidl_generate_interfaces(${PROJECT_NAME}
+  srv/TransformPoint.srv
+  srv/TransformedPoint.srv
+  srv/TransformPose.srv
+  srv/GetFrames.srv
+  DEPENDENCIES geometry_msgs sensor_msgs
+)
+
+# 安装launch和config文件
+install(DIRECTORY
+  launch
+  config
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+ament_package()
+```
+
+**注意**：本模块使用混合构建方式（ament_cmake + Python setuptools），不需要`ament`_python_install_package`，Python代码通过`setup.py`安装。
 
 ## 编译与运行
 
