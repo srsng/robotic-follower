@@ -2,37 +2,89 @@
 
 ## 概述
 
-感知模块是系统的感知核心，将相机采集模块深度数据处理为点云数据，再将点云数据经过滤波、特征提取、数据增强，传入训练好的密度信息与局部特征融合的3D目标检测网络中进行目标检测，得到场景内障碍物的三维包围盒，为后续避障规划提供完整的环境信息.
+感知模块是系统的感知核心，采用 **MMDetection3D** 作为 3D 检测框架，充分复用其成熟的 Backbone、Head、训练和评估流水线。核心创新在于：**基于 KDE 的逆密度加权预处理**（密度作为额外输入通道）和**紧凑广义非局部网络（CGNL）注意力机制**（作为自定义 Neck 注册到 mmdet3d），增强点云稀疏区域的特征表达与局部特征关联。
+
+模块将相机采集的深度数据处理为点云，经滤波和密度预处理后，送入 mmdet3d 检测网络进行目标检测，得到场景内物体的三维包围盒，为后续避障规划提供环境信息。
+
+### 处理流程
+
+```
+深度图像 → 点云转换 → 滤波 → KDE密度计算（预处理）→ [训练:数据增强(mmdet3d pipeline)] →
+  mmdet3d 3D检测网络（PointNet2 Backbone → CGNL Neck → VoteHead）→ 结果后处理 → 检测结果发布
+```
 
 ## 模块职责
 
-| 职责       | 描述                           |
-| ---------- | ------------------------------ |
-| 点云转换   | 深度图像转三维点云             |
-| 点云滤波   | 体素滤波、统计滤波、去除离群点 |
-| 密度计算   | 基于KDE的逆密度加权            |
-| 数据增强   | 训练阶段数据增强               |
-| 3D目标检测 | 密度融合网络推理               |
-| 结果发布   | 发布检测结果到ROS2话题         |
+| 职责       | 描述                                            |
+| ---------- | ----------------------------------------------- |
+| 点云转换   | 深度图像转三维点云                              |
+| 点云滤波   | 体素滤波、统计滤波、去除离群点                  |
+| 密度计算   | 基于KDE的逆密度加权（预处理，作为额外输入通道） |
+| 数据增强   | 训练阶段数据增强（mmdet3d pipeline 管理）       |
+| 3D目标检测 | mmdet3d 网络推理（PointNet2 + CGNL + VoteHead） |
+| 结果发布   | 发布检测结果到ROS2话题                          |
 
-## 处理流程
+## MMDetection3D 集成
+
+### 为什么使用 mmdet3d
+
+- **减少自定义代码**：复用 mmdet3d 成熟的 PointNet2 Backbone、VoteHead、数据增强 pipeline、训练 Runner 等，避免从零实现 ~1500 行自定义网络代码
+- **复用成熟实现**：mmdet3d 的 VoteNet 在 SUNRGBD 上有经过验证的基准性能（mAP@0.25 = 59.78%）
+- **方便对比实验**：可快速切换基线（VoteNet、3DSSD、FCAF3D），验证密度融合+CGNL 的增益
+
+### 核心 API
+
+```python
+# 低层 API：模型初始化与推理
+from mmdet3d.apis import init_model, inference_detector
+model = init_model(config, checkpoint, device='cuda:0')
+result = inference_detector(model, pcd_file)
+
+# 高层 API：LidarDet3DInferencer（封装预处理+推理+后处理）
+from mmdet3d.apis import LidarDet3DInferencer
+inferencer = LidarDet3DInferencer(model=config_path, device='cuda:0')
+result = inferencer(inputs, show=False)
+
+# 自定义模块注册（用于 CGNL Neck）
+from mmdet3d.registry import MODELS
+@MODELS.register_module()
+class CGNLNeck(nn.Module):
+    ...
+```
+
+### 配置系统
+
+mmdet3d 使用 Python 继承式配置：
 
 ```
-深度图像 → 点云转换 → 滤波 → 密度计算 → [训练:数据增强] →
-  3D检测网络 → 结果后处理 → 检测结果发布
+base model config (pointnet2_sassg)    # Backbone 定义
+  ↓ 继承
+base dataset config (sunrgbd-3d)       # 数据集与 pipeline
+  ↓ 继承
+base schedule config (schedule_3x)     # 学习率调度
+  ↓ 继承
+自定义配置 (density_votenet_sunrgbd.py) # 覆盖 Neck、输入通道等
 ```
 
-+ 先将相机采集模块深度数据处理为点云数据，通过体素滤波降低点云数据冗余、统计滤波去除离群点与噪声点；
-+ 再采用基于核密度估计（KDE）的逆密度加权方法，计算每个点的空间密度并强化稀疏区域的点云特征表达，解决深度相机点云密度不均导致的特征丢失问题；
-+ 若是网络训练阶段，则为其应用数据增强手段，丰富输入数据从而达到提升模型的泛化能力的目的；
-+ 随后通过紧凑广义非局部网络（CGNL）注意力机制编码局部特征间的关联信息，实现局部特征融合增强；
-+ 最终通过投票网络与聚类算法完成全场景点云的实例分割，输出场景内所有物体的三维包围盒与几何特征
+### 可选基线模型
+
+| 模型    | 特点                | SUNRGBD mAP@0.25 | 用途     |
+| ------- | ------------------- | ---------------- | -------- |
+| VoteNet | 投票+聚类，经典方案 | 59.78%           | 主基线   |
+| 3DSSD   | 单阶段，速度快      | -                | 速度对比 |
+| FCAF3D  | 全卷积anchor-free   | -                | 架构对比 |
+
+### mmdet3d 安装路径
+
+```
+/home/srsnn/ws/py/mmdetection3d
+```
 
 ## 数据集与数据增强
 
 ### 数据集
 
-使用SUN RGB-D数据集 进行网络训练：
+使用 SUN RGB-D 数据集进行网络训练：
 
 | 参数     | 值         |
 | -------- | ---------- |
@@ -43,6 +95,8 @@
 
 ### 数据增强方法
 
+数据增强通过 mmdet3d 的 pipeline 配置管理：
+
 | 方法                | 参数                            | 作用                             |
 | ------------------- | ------------------------------- | -------------------------------- |
 | RandomFlip3D        | -                               | 沿X轴或Y轴翻转点云，学习对称性   |
@@ -52,56 +106,36 @@
 
 ## 网络架构
 
-### DensityFusionNet
+### 方案A：密度作为预处理特征通道 + CGNL 自定义 Neck
 
-采用密度信息与局部特征融合的3D目标检测网络（DensityFusionNet），基于VoteNet框架改进。
-
-### 网络流程
+充分复用 mmdet3d 的 Backbone/Head，仅自定义预处理和 Neck：
 
 ```
-输入：点云 (N×3) + 密度 (N×1)
-  ↓
-DensitySetAbstraction SA1 (10000→2048)
-  ├─ FPS采样
-  ├─ 球查询分组
-  ├─ 密度融合
-  └─ MLP + 最大池化
-  ↓
-DensitySetAbstraction SA2 (2048→512)
-  ↓
-DensitySetAbstraction SA3 (512→128)
-  ↓
-DensitySetAbstraction SA4 (128→1)  # 全局特征
-  ↓
-FeaturePropagation FP3 (1→128)  # 三线性插值上采样
-  ↓
-FeaturePropagation FP2 (128→512)
-  ↓
-CGNL 模块（CompactGeneralizedNonLocal）
-  ├─ 分组减少计算量（4组）
-  └─ 残差连接
-  ↓
-VoteNet 投票网络
-  ├─ 投票层预测偏移
-  └─ DBSCAN聚类生成proposals
-  ↓
+输入：点云(N,3)
+  ↓ KDE密度计算（预处理，DensityCalculator）
+密度增强点云(N,4) [xyz + density]
+  ↓ mmdet3d PointNet2SASSG Backbone (in_channels=1)
+多尺度特征
+  ↓ 自定义 CGNLNeck（注册到mmdet3d MODELS）
+融合增强特征
+  ↓ mmdet3d VoteHead
 输出：3D边界框 [center, size, heading, class_scores, objectness]
 ```
 
 ### 子模块
 
-| 子模块                | 功能                                    |
-| --------------------- | --------------------------------------- |
-| DensitySetAbstraction | 密度集合抽象层，FPS采样+球查询+密度融合 |
-| FeaturePropagation    | 特征传播层，三线性插值上采样            |
-| CGNL                  | 紧凑型广义非局部网络，分组减少计算量    |
-| VoteNet               | 投票网络，预测偏移+聚类生成proposals    |
+| 子模块            | 来源         | 功能                                |
+| ----------------- | ------------ | ----------------------------------- |
+| PointNet2SASSG    | mmdet3d 内置 | Backbone 特征提取（SA层逐级下采样） |
+| CGNLNeck          | 自定义注册   | CGNL 注意力特征增强（核心创新之二） |
+| VoteHead          | mmdet3d 内置 | 投票+聚类生成 proposals，回归边界框 |
+| DensityCalculator | 自定义预处理 | KDE 逆密度加权（核心创新之一）      |
 
 ## 损失函数与训练策略
 
 ### 损失函数
 
-总损失由四部分组成：
+损失函数由 mmdet3d VoteHead 内置管理，结构与自定义方案一致：
 
 ```
 L_total = α * L_vote + β * L_objectness + γ * L_class + δ * L_bbox
@@ -116,24 +150,27 @@ L_total = α * L_vote + β * L_objectness + γ * L_class + δ * L_bbox
 
 ### 训练策略
 
-| 参数       | 值                               |
-| ---------- | -------------------------------- |
-| 优化器     | SGD with Momentum (momentum=0.9) |
-| 初始学习率 | 0.001                            |
-| 学习率调度 | StepLR，每60epoch × 0.1          |
-| 批处理大小 | 4                                |
-| 训练轮数   | 180                              |
-| 权重初始化 | Kaiming初始化                    |
+通过 mmdet3d Runner 配置管理：
+
+| 参数       | 值                               | mmdet3d 配置字段              |
+| ---------- | -------------------------------- | ----------------------------- |
+| 优化器     | SGD with Momentum (momentum=0.9) | `optim_wrapper.optimizer`     |
+| 初始学习率 | 0.001                            | `optim_wrapper.optimizer.lr`  |
+| 学习率调度 | StepLR，每60epoch × 0.1          | `param_scheduler`             |
+| 批处理大小 | 4                                | `train_dataloader.batch_size` |
+| 训练轮数   | 180                              | `train_cfg.max_epochs`        |
+| 权重初始化 | Kaiming初始化                    | mmdet3d 默认                  |
 
 ## 评估指标
 
-| 指标        | 说明                  | 目标值  |
-| ----------- | --------------------- | ------- |
-| mAP@0.25    | IoU阈值0.25的平均精度 | > 0.85  |
-| mAP@0.5     | IoU阈值0.5的平均精度  | > 0.65  |
-| AR@K        | 平均召回率            | -       |
-| 推理速度    | 帧每秒                | > 5 FPS |
-| GPU显存占用 | 峰值显存              | < 8 GB  |
+基于 mmdet3d VoteNet 在 SUNRGBD 上的官方基准设定现实预期，目标为在基线上有提升：
+
+| 指标        | 说明                  | mmdet3d 基准 | 目标值（+密度+CGNL） |
+| ----------- | --------------------- | ------------ | -------------------- |
+| mAP@0.25    | IoU阈值0.25的平均精度 | 59.78%       | > 0.60               |
+| mAP@0.5     | IoU阈值0.5的平均精度  | 35.77%       | > 0.36               |
+| 推理速度    | 帧每秒                | -            | > 5 FPS              |
+| GPU显存占用 | 峰值显存              | -            | < 8 GB               |
 
 ## ROS2话题接口
 
@@ -146,66 +183,47 @@ L_total = α * L_vote + β * L_objectness + γ * L_class + δ * L_bbox
 
 ### 发布话题
 
-| 话题名称                           | 消息类型                         | 说明         |
-| ---------------------------------- | -------------------------------- | ------------ |
-| `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2`        | 处理后点云   |
-| `/perception/detections`           | `vision_msgs/Detection3DArray`   | 3D检测结果   |
-| `/perception/obstacles`            | `vision_msgs/BoundingBox3DArray` | 障碍物包围盒 |
+| 话题名称                          | 消息类型                       | 说明       |
+| --------------------------------- | ------------------------------ | ---------- |
+| `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2`      | 处理后点云 |
+| `/perception/detections`           | `vision_msgs/Detection3DArray` | 3D检测结果 |
 
 ## 目录结构
 
 ```
-perception/
+perception/                              # 实际包名
 ├── perception/
 │   ├── __init__.py
-│   ├── point_cloud/
-│   │   ├── __init__.py
+│   ├── point_cloud/                    # 点云预处理
 │   │   ├── io/
-│   │   │   ├── __init__.py
-│   │   │   ├── depth_image_converter.py  # 深度图转点云
-│   │   │   └── pointcloud_converter.py  # ROS2消息转换
+│   │   │   ├── converters.py           # 深度图转点云、ROS2消息转换
+│   │   │   └── savers.py              # 点云保存
 │   │   ├── filters/
-│   │   │   ├── __init__.py
-│   │   │   ├── voxel_filter.py          # 体素滤波
-│   │   │   ├── statistical_filter.py     # 统计滤波
-│   │   │   └── passthrough_filter.py    # 直通滤波
-│   │   └── features/
-│   │       ├── __init__.py
-│   │       └── density_calculator.py     # 密度计算
+│   │   │   ├── voxel_filter.py         # 体素滤波（VoxelFilter）
+│   │   │   ├── statistical_filter.py   # 统计滤波（StatisticalFilter）
+│   │   │   ├── passthrough_filter.py   # 直通滤波（PassthroughFilter）
+│   │   │   └── radius_filter.py        # 半径滤波（RadiusFilter）
+│   │   ├── features/
+│   │   │   ├── density.py              # KDE密度计算（核心创新之一）
+│   │   │   └── normals.py             # 法线计算
+│   │   ├── segmentation/              # 点云分割
+│   │   └── utils/                     # 可视化等工具
 │   ├── detection/
-│   │   ├── __init__.py
-│   │   ├── models/
-│   │   │   ├── __init__.py
-│   │   │   └── density_fusion_net.py   # 检测网络
 │   │   ├── modules/
-│   │   │   ├── __init__.py
-│   │   │   ├── density_sa.py            # 密度集合抽象层
-│   │   │   ├── feature_propagation.py   # 特征传播层
-│   │   │   ├── cgnl.py                # CGNL模块
-│   │   │   └── vote_net.py            # 投票网络
-│   │   ├── data/
-│   │   │   ├── __init__.py
-│   │   │   ├── dataset.py              # 数据集类
-│   │   │   └── augmentation.py         # 数据增强
-│   │   ├── training/
-│   │   │   ├── __init__.py
-│   │   │   ├── trainer.py             # 训练器
-│   │   │   └── loss.py                # 损失函数
+│   │   │   └── cgnl.py                # CGNL Neck（核心创新之二，注册到mmdet3d）
 │   │   └── inference/
-│   │       ├── __init__.py
-│   │       └── detector.py             # 推理器
-│   └── ros_nodes/
-│       ├── __init__.py
-│       └── perception_node.py        # 感知节点
-├── scripts/
-│   ├── __init__.py
-│   ├── train.py                      # 训练脚本
-│   └── evaluate.py                   # 评估脚本
-├── config/
-│   ├── model_config.yaml              # 模型配置
-│   └── pipeline_config.yaml          # 管道配置
-├── data/
-│   └── checkpoints/                  # 模型检查点
+│   │       └── detector.py            # 封装mmdet3d推理调用
+│   ├── ros_nodes/
+│   │   ├── perception_node.py         # 感知节点（原始版本）
+│   │   └── perception_node_mmdet3d.py # ROS2感知节点（mmdet3d版本）
+│   └── scripts/
+│       ├── train.py                   # 调用mmdet3d训练
+│       ├── evaluate.py                # 调用mmdet3d评估
+│       ├── detect.py                  # 检测脚本
+│       └── prepare_data.py            # 数据准备
+├── configs/                            # mmdet3d 配置文件
+│   ├── density_votenet_sunrgbd.py      # 密度融合VoteNet配置
+│   └── votenet_sunrgbd_baseline.py     # 基线对比配置
 ├── launch/
 │   └── perception.launch.py           # 启动文件
 ├── setup.py
@@ -214,44 +232,7 @@ perception/
 
 ## 核心类设计
 
-### DepthImageConverter
-
-```python
-class DepthImageConverter:
-    """深度图像转点云转换器"""
-
-    def __init__(self, camera_info: CameraInfo):
-        self.fx = camera_info.k[0]
-        self.fy = camera_info.k[4]
-        self.cx = camera_info.k[2]
-        self.cy = camera_info.k[5]
-        self.width = camera_info.width
-        self.height = camera_info.height
-
-    def convert(self, depth_image: np.ndarray) -> np.ndarray:
-        """
-        深度图像转点云
-
-        公式：
-        x = (u - cx) * depth / fx
-        y = (v - cy) * depth / fy
-        z = depth
-        """
-        points = np.zeros((self.height * self.width, 3), dtype=np.float32)
-
-        for v in range(self.height):
-            for u in range(self.width):
-                depth = depth_image[v, u]
-                if depth > 0:
-                    idx = v * self.width + u
-                    points[idx, 0] = (u - self.cx) * depth / self.fx
-                    points[idx, 1] = (v - self.cy) * depth / self.fy
-                    points[idx, 2] = depth
-
-        return points
-```
-
-### DensityCalculator
+### DensityCalculator（预处理，自定义）
 
 ```python
 class DensityCalculator:
@@ -289,173 +270,172 @@ class DensityCalculator:
         return densities
 ```
 
-### DensityFusionNet
+### CGNLNeck（自定义 Neck，注册到 mmdet3d）
 
 ```python
-class DensityFusionNet(nn.Module):
-    """密度融合3D目标检测网络"""
+from mmdet3d.registry import MODELS
+from mmengine.model import BaseModule
 
-    def __init__(self, num_classes: int = 18, num_proposals: int = 256):
-        super().__init__()
+@MODELS.register_module()
+class CGNLNeck(BaseModule):
+    """
+    紧凑型广义非局部网络 Neck
 
-        # SA层
-        self.sa1 = DensitySetAbstraction(10000, 2048, [64, 64, 128])
-        self.sa2 = DensitySetAbstraction(2048, 512, [128, 128, 256])
-        self.sa3 = DensitySetAbstraction(512, 128, [256, 256, 512])
-        self.sa4 = DensitySetAbstraction(128, 1, [512, 512, 1024])
+    将 CGNL 注意力机制作为 mmdet3d Neck 模块注册，
+    接收 Backbone 输出的多尺度特征，增强局部特征关联。
 
-        # FP层
-        self.fp3 = FeaturePropagation(128, 256)
-        self.fp2 = FeaturePropagation(512, 512)
+    Args:
+        in_channels: 输入特征维度
+        groups: 分组数量（减少计算量）
+    """
 
-        # CGNL模块
-        self.cgnl = CompactGeneralizedNonLocal(512, groups=4)
+    def __init__(self, in_channels: int, groups: int = 4, init_cfg=None):
+        super().__init__(init_cfg=init_cfg)
+        self.groups = groups
+        self.channels_per_group = in_channels // groups
 
-        # 投票网络
-        self.vote_net = VoteNetModule(512, num_classes, num_proposals)
+        # θ, φ, g 变换
+        self.theta = nn.Conv1d(in_channels, in_channels, 1)
+        self.phi = nn.Conv1d(in_channels, in_channels, 1)
+        self.g = nn.Conv1d(in_channels, in_channels, 1)
 
-    def forward(self, xyz: torch.Tensor, points: torch.Tensor,
-               density: torch.Tensor):
+        # 输出变换
+        self.out_conv = nn.Conv1d(in_channels, in_channels, 1)
+        self.bn = nn.BatchNorm1d(in_channels)
+
+    def forward(self, x):
         """
-        前向传播
-
         Args:
-            xyz: 点云坐标 (B, N, 3)
-            points: 点云特征 (B, N, C)
-            density: 点云密度 (B, N, 1)
+            x: Backbone 输出特征 (B, C, M)
+
+        Returns:
+            增强后的特征 (B, C, M)
         """
-        # 融合密度特征
-        points = torch.cat([points, density], dim=-1)
+        B, C, M = x.shape
 
-        # 下采样
-        xyz1, points1 = self.sa1(xyz, points)
-        xyz2, points2 = self.sa2(xyz1, points1)
-        xyz3, points3 = self.sa3(xyz2, points2)
-        xyz4, points4 = self.sa4(xyz3, points3)
+        theta = self.theta(x)
+        phi = self.phi(x)
+        g = self.g(x)
 
-        # 上采样
-        points3 = self.fp3(xyz3, points3, xyz4, points4)
-        points2 = self.fp2(xyz2, points2, xyz3, points3)
+        # 分组
+        theta = theta.view(B, self.groups, self.channels_per_group, M)
+        phi = phi.view(B, self.groups, self.channels_per_group, M)
+        g = g.view(B, self.groups, self.channels_per_group, M)
 
-        # CGNL特征融合
-        points2 = self.cgnl(points2)
+        # 分组注意力
+        sim = torch.einsum('bgcm,bgcn->bgmn', theta, phi)
+        sim = F.softmax(sim / (self.channels_per_group ** 0.5), dim=-1)
 
-        # 投票
-        detections = self.vote_net(xyz2, points2)
+        out = torch.einsum('bgmn,bgcn->bgcm', sim, g)
+        out = out.contiguous().view(B, C, M)
 
-        return detections
+        # 残差连接
+        out = self.out_conv(out)
+        out = self.bn(out)
+        out = F.relu(out + x)
+
+        return out
 ```
 
-### PerceptionNode
+### mmdet3d 配置文件示例（替代原 DensityFusionNet）
 
 ```python
-class PerceptionNode(Node):
-    """感知ROS2节点"""
+# configs/density_votenet_sunrgbd.py
+_base_ = [
+    # 基于 mmdet3d 官方 VoteNet SUNRGBD 配置
+    'mmdet3d::votenet/votenet_8xb16_sunrgbd-3d.py'
+]
+
+# 自定义模块导入（确保 CGNLNeck 被注册）
+custom_imports = dict(
+    imports=['perception.detection.modules.cgnl'],
+    allow_failed_imports=False
+)
+
+# 修改 model：增加密度输入通道 + CGNL Neck
+model = dict(
+    backbone=dict(
+        type='PointNet2SASSG',
+        in_channels=1,  # 密度通道（原始为0，即仅xyz）
+    ),
+    neck=dict(
+        type='CGNLNeck',
+        in_channels=256,  # 与 Backbone 输出通道匹配
+        groups=4,
+    ),
+)
+
+# 训练策略
+optim_wrapper = dict(
+    type='OptimWrapper',
+    optimizer=dict(type='SGD', lr=0.001, momentum=0.9, weight_decay=0.0001),
+)
+
+param_scheduler = [
+    dict(type='StepLR', step_size=60, gamma=0.1),
+]
+
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=180, val_interval=10)
+
+train_dataloader = dict(batch_size=4)
+```
+
+### PerceptionNode（mmdet3d 版本）
+
+```python
+class MMDet3DPerceptionNode(Node):
+    """感知节点：使用 MMDetection3D 进行 3D 检测"""
 
     def __init__(self):
         super().__init__('perception_node')
 
         # 订阅话题
         self.depth_sub = self.create_subscription(
-            Image,
-            '/camera/depth/image_rect_raw',
-            self.depth_callback,
-            10
-        )
+            Image, '/camera/depth/image_rect_raw',
+            self.depth_callback, QoSProfile(depth=10, reliability=1))
         self.camera_info_sub = self.create_subscription(
-            CameraInfo,
-            '/camera/camera_info',
-            self.camera_info_callback,
-            10
-        )
+            CameraInfo, '/camera/camera_info',
+            self.camera_info_callback, QoSProfile(depth=10, reliability=1))
 
         # 发布话题
         self.pointcloud_pub = self.create_publisher(
-            PointCloud2,
-            '/perception/processed_pointcloud',
-            10
-        )
+            PointCloud2, '/perception/processed_pointcloud', QoSProfile(depth=5))
         self.detections_pub = self.create_publisher(
-            Detection3DArray,
-            '/perception/detections',
-            10
-        )
+            Detection3DArray, '/perception/detections', QoSProfile(depth=5))
 
-        # 初始化组件
-        self.depth_converter = None
-        self.detector = Detector('config/model_config.yaml')
+        # 初始化 mmdet3d Inferencer
+        self.inferencer = None
+        if MMDET3D_AVAILABLE:
+            config_path = os.path.join(MMD3D_PATH, 'configs/density_votenet_sunrgbd.py')
+            device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+            self.inferencer = LidarDet3DInferencer(model=config_path, device=device)
+
+        # 滤波器
+        self.voxel_filter = VoxelFilter(voxel_size=0.02)
+        self.statistical_filter = StatisticalFilter(nb_neighbors=20, std_ratio=2.0)
+        self.pass_filter = PassthroughFilter(axis_name='z', min_limit=0.0, max_limit=3.0)
 
     def depth_callback(self, msg: Image):
-        """深度图像回调"""
-        if self.depth_converter is None:
-            return
-
-        # 深度图像转点云
-        depth_image = self.cv_bridge.imgmsg_to_cv2(msg)
-        points = self.depth_converter.convert(depth_image)
-
+        """深度图像回调：点云转换 → 滤波 → 检测 → 发布"""
+        # 深度图转点云
+        points = depth_to_pointcloud(depth_image, self.camera_info)
         # 点云滤波
-        points = self.filter_pointcloud(points)
-
-        # 密度计算
-        density = self.compute_density(points)
-
-        # 3D检测
-        detections = self.detector.detect(points, density)
-
-        # 发布结果
-        self.publish_detections(detections)
+        points = self._process_pointcloud(points)
+        # 发布处理后点云
+        self._publish_pointcloud(points, msg.header)
+        # mmdet3d 推理
+        if self.inferencer:
+            result = self.inferencer({'points': points}, show=False)
+            self._publish_detections(result, msg.header)
 ```
 
 ## 配置文件
 
-### model_config.yaml
+### mmdet3d 配置（density_votenet_sunrgbd.py）
 
-```yaml
-model:
-  name: "density_fusion_net"
-  num_classes: 18
-  input_points: 10000
-  feature_dim: 256
-  use_density_fusion: true
-  use_cgnl: true
-  cgnl_groups: 4
-  num_proposals: 256
+见上方"mmdet3d 配置文件示例"，通过继承 mmdet3d 官方 VoteNet 配置，仅覆盖 Backbone `in_channels`、添加 `CGNLNeck` 和训练超参。
 
-layers:
-  sa:
-    - npoint: 2048; radius: 0.2; nsample: 64; mlp: [64, 64, 128]
-    - npoint: 512; radius: 0.4; nsample: 64; mlp: [128, 128, 256]
-    - npoint: 128; radius: 0.8; nsample: 64; mlp: [256, 256, 512]
-    - npoint: 1; radius: 1.2; nsample: 64; mlp: [512, 512, 1024]
-
-training:
-  batch_size: 4
-  num_epochs: 180
-  learning_rate: 0.001
-  lr_step: 60
-  lr_gamma: 0.1
-  weight_decay: 0.0001
-  momentum: 0.9
-
-data:
-  dataset: "sunrgbd"
-  data_root: "./data/SUNRGBD"
-  point_num: 20000
-  use_color: false
-  use_normal: false
-  use_density: true
-
-augmentation:
-  random_flip: true
-  random_rotation: true
-  rotation_range: [-30, 30]
-  random_scale: [0.85, 1.15]
-  jitter_sigma: 0.01
-  random_drop_ratio: 0.05
-```
-
-### pipeline_config.yaml
+### pipeline_config.yaml（点云预处理参数）
 
 ```yaml
 filters:
@@ -478,12 +458,6 @@ density_calculation:
   bandwidth: 0.5
   k_neighbors: 50
   normalization: "minmax"
-
-detection_3d:
-  enabled: true
-  model_config_path: "config/model_config.yaml"
-  confidence_threshold: 0.5
-  model_path: "data/checkpoints/best_model.pth"
 ```
 
 ## 安装依赖
@@ -493,10 +467,14 @@ detection_3d:
 pip3 install torch torchvision
 pip3 install open3d
 pip3 install scipy
-pip3 install scikit-learn
 pip3 install numpy
 pip3 install opencv-python
-pip3 install pyyaml
+
+# mmdet3d 及依赖（已安装在 /home/srsnn/ws/py/mmdetection3d）
+pip install -U openmim
+mim install mmengine
+mim install mmengine mmcv mmdet
+pip3 install -e /home/srsnn/ws/py/mmdetection3d
 
 # ROS2依赖
 sudo apt install ros-humble-vision-msgs
@@ -516,9 +494,35 @@ source install/setup.bash
 
 ### 训练
 
+使用 mmdet3d 训练工具：
+
 ```bash
-cd ~/ros2_ws/src/perception
-python3 scripts/train.py --config config/model_config.yaml
+# 基线 VoteNet 训练
+cd /home/srsnn/ws/py/mmdetection3d
+python tools/train.py ~/ros2_ws/src/perception/configs/votenet_sunrgbd_baseline.py
+
+# 密度融合 VoteNet 训练
+python tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py
+
+# 多 GPU 训练
+bash tools/dist_train.sh ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py 2
+
+# 继续训练
+python tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+    --resume work_dirs/density_votenet_sunrgbd/latest.pth
+```
+
+### 评估
+
+```bash
+# 评估模型
+cd /home/srsnn/ws/py/mmdetection3d
+python tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+    work_dirs/density_votenet_sunrgbd/best.pth
+
+# 可视化评估结果
+python tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+    work_dirs/density_votenet_sunrgbd/best.pth --show
 ```
 
 ### 运行感知节点
@@ -529,15 +533,53 @@ ros2 launch perception perception.launch.py
 
 ## 性能指标
 
-| 指标         | 目标值   |
-| ------------ | -------- |
-| mAP@0.25     | > 0.85   |
-| mAP@0.5      | > 0.65   |
-| 推理速度     | > 5 FPS  |
-| 点云处理延迟 | < 100 ms |
-| 端到端延迟   | < 200 ms |
+| 指标         | mmdet3d 基准 | 目标值   |
+| ------------ | ------------ | -------- |
+| mAP@0.25     | 59.78%       | > 60%    |
+| mAP@0.5      | 35.77%       | > 36%    |
+| 推理速度     | -            | > 5 FPS  |
+| 点云处理延迟 | -            | < 100 ms |
+| 端到端延迟   | -            | < 200 ms |
+
+## 可行性评估
+
+### 技术可行性
+
+- **mmdet3d 对 VoteNet + SUNRGBD 有成熟支持**：官方提供完整的配置、预训练权重和基准结果
+- **自定义 Neck 注册机制简单**：通过 `@MODELS.register_module()` 装饰器 + `custom_imports` 配置即可集成 CGNL Neck，无需修改 mmdet3d 源码
+- **密度通道扩展直接**：PointNet2SASSG 的 `in_channels` 参数控制额外输入通道数，设为 1 即可接收密度特征
+
+### 性能可行性
+
+- **基于官方基准的现实预期**：mmdet3d VoteNet 在 SUNRGBD 上 mAP@0.25 = 59.78%，mAP@0.5 = 35.77%
+- **密度特征通道有望在基线上提升**：逆密度加权强化稀疏区域表达，对深度相机不均匀点云分布有针对性改善
+- **CGNL 注意力增强局部关联**：在 Backbone 后、Head 前增加 CGNL Neck，预期可进一步提升特征质量
+
+### 集成可行性
+
+- **mmdet3d 推理 API 已在 `perception_node_mmdet3d.py` 中初步集成**：使用 `LidarDet3DInferencer` 高层 API
+- **点云预处理管道已实现**：`point_cloud/` 子模块提供完整的滤波和密度计算功能
+
+### 风险
+
+| 风险                           | 影响 | 缓解措施                                    |
+| ------------------------------ | ---- | ------------------------------------------- |
+| KDE 密度预处理延迟             | 中   | KDE 计算约 50-100ms，可通过降采样或近似加速 |
+| SUNRGBD 10类 vs 实际场景       | 中   | 可能需要在实际场景数据上微调                |
+| CGNL Neck 与 VoteHead 接口适配 | 低   | 需确保 Neck 输出维度与 VoteHead 输入匹配    |
+| mmdet3d 版本兼容性             | 低   | 固定使用已安装版本，锁定依赖                |
+
+### 对比实验计划
+
+按以下顺序递进验证每个创新点的增益：
+
+| 实验       | 配置                               | 预期结果                       |
+| ---------- | ---------------------------------- | ------------------------------ |
+| 基线       | VoteNet（原始，in_channels=0）     | mAP@0.25 ≈ 59.78%（复现基准）  |
+| +密度通道  | VoteNet + density（in_channels=1） | 基线上有小幅提升               |
+| +密度+CGNL | VoteNet + density + CGNLNeck       | 进一步提升，验证注意力机制效果 |
 
 ---
 
-**文档版本**: 1.0
-**最后更新**: 2026-03-12
+**文档版本**: 2.0
+**最后更新**: 2026-03-13

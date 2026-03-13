@@ -4,15 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-这是一个基于 ROS2 Humble 的机械臂视觉跟随系统，采用开环控制架构，包含七大核心模块：
+这是一个基于 ROS2 Humble 的机械臂视觉跟随系统，采用开环控制架构，充分复用社区成熟方案：
 
-- **camera_acquisition**: 相机采集模块，负责相机标定与数据采集
-- **perception**: 感知模块，点云处理与3D目标检测
-- **hand_eye_calibration**: 手眼标定模块，获取手眼变换矩阵
-- **coordinate_transform**: 坐标变换模块，基于TF2树管理坐标转换
-- **motion_control**: 运动控制模块，基于MoveIt进行轨迹规划
-- **robot_execution**: 机械臂执行模块，机械臂驱动与运动执行
-- **visualization_simulation**: 可视化与仿真模块，Rviz2可视化与Gazebo仿真
+- **realsense2_camera**: 相机采集（ROS2官方包，apt安装）
+- **perception**: 感知模块，点云处理(Open3D) + 3D目标检测(MMDetection3D)
+- **hand_eye_calibration**: 手眼标定模块，获取手眼变换矩阵 + TF自动发布
+- **ros2_dummy_arm_810**: 机械臂驱动 + MoveIt2运动规划（含PyMoveIt2接口）
+- **visual_follow**: 视觉跟随协调器（待实现），连接感知与运动控制
 
 ## 开发环境配置
 
@@ -249,31 +247,37 @@ colcon test-result --verbose
 
 ## 训练感知模块
 
-### 训练 3D 检测网络
+### 训练 3D 检测网络（MMDetection3D）
 
 ```bash
-cd ~/ros2_ws/src/perception
+cd /home/srsnn/ws/py/mmdetection3d
 
-# 训练网络
-python3 scripts/train.py --config config/model_config.yaml
+# 基线 VoteNet 训练
+python tools/train.py ~/ros2_ws/src/perception/configs/votenet_sunrgbd_baseline.py
 
-# 使用特定 GPU
-CUDA_VISIBLE_DEVICES=0 python3 scripts/train.py --config config/model_config.yaml
+# 密度融合 VoteNet 训练
+python tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py
+
+# 多 GPU 训练
+bash tools/dist_train.sh ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py 2
 
 # 继续训练
-python3 scripts/train.py --config config/model_config.yaml --resume data/checkpoints/last_model.pth
+python tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+    --resume work_dirs/density_votenet_sunrgbd/latest.pth
 ```
 
 ### 评估模型
 
 ```bash
-cd ~/ros2_ws/src/perception
+cd /home/srsnn/ws/py/mmdetection3d
 
 # 评估模型
-python3 scripts/evaluate.py --config config/model_config.yaml --checkpoint data/checkpoints/best_model.pth
+python tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+    work_dirs/density_votenet_sunrgbd/best.pth
 
-# 生成测试结果
-python3 scripts/evaluate.py --config config/model_config.yaml --checkpoint data/checkpoints/best_model.pth --visualize
+# 可视化评估结果
+python tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+    work_dirs/density_votenet_sunrgbd/best.pth --show
 ```
 
 ## 调试工具
@@ -393,86 +397,79 @@ ros2 interface show package_name/srv/ServiceType
 
 ```
 ros2_ws/
-├── src/                          # 源代码目录
-│   ├── camera_acquisition/       # 相机采集模块
-│   │   ├── camera_acquisition/
-│   │   │   ├── camera/          # 相机驱动和管理
-│   │   │   ├── calibration/     # 相机内参标定
-│   │   │   └── ros_nodes/      # ROS2节点
-│   │   ├── launch/              # 启动文件
-│   │   ├── config/              # 配置文件
-│   │   ├── setup.py
-│   │   └── package.xml
-│   ├── perception/              # 感知模块
+├── src/                              # 源代码目录
+│   ├── perception/                    # 感知模块（自研）
 │   │   ├── perception/
-│   │   │   ├── point_cloud/    # 点云处理
-│   │   │   ├── detection/      # 3D目标检测
-│   │   │   └── ros_nodes/      # ROS2节点
-│   │   ├── scripts/             # 训练脚本
-│   │   ├── data/                # 数据集和模型
+│   │   │   ├── point_cloud/          # 点云处理（Open3D）
+│   │   │   ├── detection/            # 3D检测（MMDetection3D集成）
+│   │   │   │   └── modules/cgnl.py   # CGNL Neck（自定义注册到mmdet3d）
+│   │   │   └── ros_nodes/            # ROS2节点
+│   │   ├── configs/                   # mmdet3d 配置文件
 │   │   ├── launch/
-│   │   ├── config/
 │   │   ├── setup.py
 │   │   └── package.xml
-│   ├── hand_eye_calibration/    # 手眼标定模块
-│   ├── coordinate_transform/    # 坐标变换模块
-│   ├── motion_control/         # 运动控制模块
-│   ├── robot_execution/        # 机械臂执行模块
-│   └── visualization_simulation/ # 可视化与仿真模块
-├── install/                     # 编译输出
-├── build/                       # 构建中间文件
-├── log/                         # 构建日志
-├── doc/                         # 文档
-│   ├── main.md                  # 系统设计文档
-│   └── modules/                 # 模块设计文档
-├── CLAUDE.md                    # 开发指南（本文件）
-└── README.md                    # 项目说明
+│   ├── hand_eye_calibration/          # 手眼标定模块（自研）
+│   │   ├── hand_eye_calibration/
+│   │   │   ├── calibration/           # 标定算法
+│   │   │   ├── camera/                # 标定板检测
+│   │   │   └── ros_nodes/             # 标定节点 + TF发布
+│   │   ├── results/                    # 标定结果（自动加载）
+│   │   ├── launch/
+│   │   ├── setup.py
+│   │   └── package.xml
+│   ├── ros2_dummy_arm_810/            # 机械臂驱动 + MoveIt（自研）
+│   │   ├── dummy_controller/           # 硬件驱动
+│   │   ├── dummy-ros2_description/     # URDF
+│   │   ├── dummy_moveit_config/        # MoveIt2配置 + Launch
+│   │   └── dummy_server/               # PyMoveIt2接口
+│   └── visual_follow/                 # 视觉跟随协调器（待实现）
+├── install/                           # 编译输出
+├── build/                             # 构建中间文件
+├── log/                               # 构建日志
+├── doc/                               # 文档
+│   ├── modules/                        # 模块设计文档
+│   │   ├── README.md                   # 模块总览
+│   │   ├── 02_perception.md            # 感知模块设计
+│   │   └── 01_hand_eye_calibration.md  # 手眼标定模块设计
+│   └── main.md                         # 系统设计文档
+├── CLAUDE.md                          # 开发指南（本文件）
+└── README.md                          # 项目说明
 ```
 
 ## 模块间数据流
 
 ```
-camera_acquisition → perception → coordinate_transform → motion_control → robot_execution
-                                    ↑
-hand_eye_calibration ───────────┘
-                                    ↑
-visualization_simulation ──────────┘ (仅可视化，不参与控制)
+realsense2_camera → perception → visual_follow → MoveIt2/PyMoveIt2 → dummy_arm_controller
+                                     ↕
+                              tf2_ros(坐标变换)
+                                     ↑
+                         hand_eye_calibration (TF发布)
 ```
 
 ## 系统话题汇总
 
 ### 发布话题
 
-| 话题名称                           | 消息类型                          | 来源模块                 |
-| ---------------------------------- | --------------------------------- | ------------------------ |
-| `/camera/color/image_raw`          | `sensor_msgs/Image`               | camera_acquisition       |
-| `/camera/depth/image_rect_raw`     | `sensor_msgs/Image`               | camera_acquisition       |
-| `/camera/camera_info`              | `sensor_msgs/CameraInfo`          | camera_acquisition       |
-| `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2`         | perception               |
-| `/perception/detections`           | `vision_msgs/Detection3DArray`    | perception               |
-| `/perception/obstacles`            | `vision_msgs/BoundingBox3DArray`  | perception               |
-| `/motion_control/trajectory`       | `trajectory_msgs/JointTrajectory` | motion_control           |
-| `/robot/joint_states`              | `sensor_msgs/JointState`          | robot_execution          |
-| `/robot/pose`                      | `geometry_msgs/PoseStamped`       | robot_execution          |
-| `/viz/markers`                     | `visualization_msgs/MarkerArray`  | visualization_simulation |
+| 话题名称                                   | 消息类型                       | 来源                 |
+| ------------------------------------------ | ------------------------------ | -------------------- |
+| `/camera/color/image_raw`                  | `sensor_msgs/Image`            | realsense2_camera    |
+| `/camera/depth/image_rect_raw`             | `sensor_msgs/Image`            | realsense2_camera    |
+| `/camera/aligned_depth_to_color/image_raw` | `sensor_msgs/Image`            | realsense2_camera    |
+| `/camera/color/camera_info`                | `sensor_msgs/CameraInfo`       | realsense2_camera    |
+| `/perception/processed_pointcloud`          | `sensor_msgs/PointCloud2`      | perception           |
+| `/perception/detections`                    | `vision_msgs/Detection3DArray` | perception           |
+| `/joint_states`                            | `sensor_msgs/JointState`       | dummy_arm_controller |
 
 ### 服务汇总
 
-| 服务名称                                | 来源模块                          |
-| --------------------------------------- | --------------------------------- |
-| `/hand_eye_calibration/add_sample`      | hand_eye_calibration              |
-| `/hand_eye_calibration/execute`         | hand_eye_calibration              |
-| `/hand_eye_calibration/reset`           | hand_eye_calibration              |
-| `/coordinate_transform/transform_point` | coordinate_transform              |
-| `/coordinate_transform/transform_pose`  | coordinate_transform              |
-| `/coordinate_transform/get_all_frames`  | coordinate_transform              |
-| `/motion_control/follow`                | motion control                    |
-| `/motion_control/stop`                  | motion_control                    |
-| `/robot_execution/enable`               | robot_execution                   |
-| `/robot_execution/disable`              | robot_execution                   |
-| `/robot_execution/reset`                | robot_execution                   |
-| `/spawn_entity`                         | visualization_simulation (Gazebo) |
-| `/delete_entity`                        | visualization_simulation (Gazebo) |
+| 服务名称                           | 来源                 |
+| ---------------------------------- | -------------------- |
+| `/hand_eye_calibration/add_sample` | hand_eye_calibration |
+| `/hand_eye_calibration/execute`    | hand_eye_calibration |
+| `/hand_eye_calibration/reset`      | hand_eye_calibration |
+| `/dummy_arm/enable`                | dummy_arm_controller |
+| `/gripper_open`                    | dummy_arm_controller |
+| `/gripper_close`                   | dummy_arm_controller |
 
 ## TF 树结构
 
@@ -492,27 +489,18 @@ base_link (机器人基座)
 
 详细模块设计文档位于 `doc/modules/` 目录：
 
-| 文档                                         | 说明                 |
-| -------------------------------------------- | -------------------- |
-| `doc/modules/README.md`                      | 模块总览文档         |
-| `doc/modules/01_camera_acquisition.md`       | 相机采集模块设计     |
-| `doc/modules/02_perception.md`               | 感知模块设计         |
-| `doc/modules/03_hand_eye_calibration.md`     | 手眼标定模块设计     |
-| `doc/modules/04_coordinate_transform.md`     | 坐标变换模块设计     |
-| `doc/modules/05_motion_control.md`           | 运动控制模块设计     |
-| `doc/modules/06_robot_execution.md`          | 机械臂执行模块设计   |
-| `doc/modules/07_visualization_simulation.md` | 可视化与仿真模块设计 |
+| 文档                                     | 说明               |
+| ---------------------------------------- | ------------------ |
+| `doc/modules/README.md`                  | 模块总览与系统运行 |
+| `doc/modules/02_perception.md`           | 感知模块设计       |
+| `doc/modules/01_hand_eye_calibration.md` | 手眼标定模块设计   |
 
 ## 性能指标
 
-| 指标类别    | 指标         | 目标值   |
-| ----------- | ------------ | -------- |
-| 相机采集    | 帧率         | ≥ 30 FPS |
-| 感知        | mAP@0.25     | > 0.85   |
-| 感知        | 推理速度     | > 5 FPS  |
-| 坐标变换    | 查询延迟     | < 5 ms   |
-| 运动控制    | 轨迹规划时间 | < 100 ms |
-| 机械臂执行  | 控制频率     | 100 Hz   |
-| Rviz2可视化 | 帧率         | ≥ 30 FPS |
-| Gazebo仿真  | 仿真速度     | ≥ 1.0x   |
-| 系统整体    | 端到端延迟   | < 200 ms |
+| 指标类别   | 指标       | 目标值    |
+| ---------- | ---------- | --------- |
+| 相机采集   | 帧率       | >= 30 FPS |
+| 感知       | mAP@0.25   | > 60%     |
+| 感知       | 推理速度   | > 5 FPS   |
+| 机械臂执行 | 控制频率   | 100 Hz    |
+| 系统整体   | 端到端延迟 | < 200 ms  |

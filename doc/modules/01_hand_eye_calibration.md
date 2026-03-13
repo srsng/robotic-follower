@@ -14,6 +14,7 @@
 | 标定求解 | 使用PnP算法求解AX=XB方程                |
 | 结果验证 | 验证标定精度和重投影误差                |
 | 结果保存 | 保存标定结果到文件                      |
+| TF发布   | 自动加载标定结果并发布为静态TF          |
 
 ## 标定方法
 
@@ -84,7 +85,27 @@ end_effector (机械臂末端)
         └─ camera_depth_optical_frame (深度相机光学坐标系)
 ```
 
-标定结果作为静态TF发布，由坐标变换模块使用。
+标定结果作为静态TF发布。本模块同时承担标定结果的持久化管理和TF自动发布职责（原坐标变换模块的TF发布功能已合并到本模块）。
+
+### 标定结果TF自动发布
+
+标定节点启动时，自动检查 `results/calibration.yaml` 是否存在：
+- **存在**：加载标定结果并立即发布为静态TF，无需重新标定
+- **不存在**：等待用户通过服务接口执行标定流程
+
+```yaml
+# results/calibration.yaml 格式
+hand_eye_transform:
+  parent_frame: "end_effector"
+  child_frame: "camera_link"
+  translation: [x, y, z]        # 米
+  quaternion: [x, y, z, w]      # 四元数
+  rotation_matrix: [[...], ...]  # 3x3旋转矩阵（备用）
+  calibration_error: 0.002       # 标定误差（米）
+  calibration_date: "2026-03-13"
+```
+
+这确保系统启动后无需每次重新标定，手眼变换TF即可立即可用。
 
 ## 目录结构
 
@@ -395,7 +416,32 @@ class CalibrationNode(Node):
         # 创建TF广播器
         self.tf_broadcaster = StaticTransformBroadcaster(self)
 
+        # 启动时自动加载已有标定结果
+        self._auto_load_calibration()
+
         self.get_logger().info("手眼标定节点已启动")
+
+    def _auto_load_calibration(self):
+        """启动时自动加载已保存的标定结果并发布TF"""
+        calibration_file = os.path.join(
+            get_package_share_directory('hand_eye_calibration'),
+            'results', 'calibration.yaml'
+        )
+        if os.path.exists(calibration_file):
+            import yaml
+            with open(calibration_file, 'r') as f:
+                result = yaml.safe_load(f)
+            transform_data = result.get('hand_eye_transform', {})
+            if transform_data:
+                self._publish_transform({
+                    'translation_vector': transform_data['translation'],
+                    'quaternion': transform_data['quaternion'],
+                })
+                self.get_logger().info(
+                    f"已加载标定结果并发布TF (误差: {transform_data.get('calibration_error', 'N/A')}m)"
+                )
+        else:
+            self.get_logger().warn("未找到标定结果文件，需要执行手眼标定")
 
     def add_sample_callback(self, request, response):
         """添加标定样本服务回调"""
@@ -591,5 +637,5 @@ ros2 service call /hand_eye_calibration/execute hand_eye_calibration/srv/Execute
 
 ---
 
-**文档版本**: 1.0
-**最后更新**: 2026-03-12
+**文档版本**: 1.1
+**最后更新**: 2026-03-13
