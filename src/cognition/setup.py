@@ -12,7 +12,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/config', ['cognition/config/model_config.yaml']),
         ('share/' + package_name + '/config', ['cognition/config/pipeline_config.yaml']),
-    ],
+        ],
     install_requires=[
         'setuptools',
         'numpy',
@@ -20,7 +20,11 @@ setup(
         'open3d>=0.17.0',
         'scikit-learn',
         'pyyaml',
-        'opencv-python'
+        'opencv-python',
+        # MMDetection3D 相关依赖
+        'mmcv-full>=2.0.0',
+        'mmengine>=0.8.0',
+        'mmdet>=3.0.0',
     ],
     zip_safe=True,
     maintainer='srsnn',
@@ -31,7 +35,7 @@ setup(
         'test': [
             'pytest',
             ],
-    },
+        },
     entry_points={
         'console_scripts': [
             f'perception_node = {package_name}.ros_nodes.perception_node:main',
