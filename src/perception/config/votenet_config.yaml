@@ -18,7 +18,7 @@ density:
 # 3D 检测器配置 - VoteNet
 detector:
   type: 'standard'
-  config_file: ''  # VoteNet 使用内置配置
+  config_file: '/home/srsnn/ws/py/mmdetection3d/configs/votenet/votenet_8xb16_sunrgbd-3d.py'
   checkpoint_file: '/home/srsnn/ros2_ws/models/votenet_sunrgbd.pth'
   device: 'cuda:0'
   score_threshold: 0.3

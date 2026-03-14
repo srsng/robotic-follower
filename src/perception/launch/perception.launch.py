@@ -14,6 +14,7 @@ def generate_launch_description():
     # 声明启动参数
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     config_file = LaunchConfiguration('config_file', default='')
+    enable_visualization = LaunchConfiguration('enable_visualization', default='true')
 
     # 感知节点
     perception_node = Node(
@@ -24,6 +25,7 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': use_sim_time,
             'config_file': config_file,
+            'enable_visualization': enable_visualization,
         }]
     )
 
@@ -38,6 +40,11 @@ def generate_launch_description():
             'config_file',
             default_value='',
             description='Path to perception config file'
+        ),
+        DeclareLaunchArgument(
+            'enable_visualization',
+            default_value='true',
+            description='Enable 3D detection visualization'
         ),
 
         # 启动节点

@@ -20,6 +20,7 @@ from perception.point_cloud.io.ros_converters import numpy_to_pointcloud2
 from perception.point_cloud.filters.filters import create_default_filter_pipeline
 from perception.point_cloud.features.density import DensityCalculator
 from perception.detection.inference.detector import create_detector_from_config
+from perception.visualization.visualizer import DetectionVisualizer
 
 
 class PerceptionNode(Node):
@@ -30,7 +31,9 @@ class PerceptionNode(Node):
 
         # 加载配置
         self.declare_parameter('config_file', '')
+        self.declare_parameter('enable_visualization', True)
         config_file = self.get_parameter('config_file').value
+        self.enable_viz = self.get_parameter('enable_visualization').value
 
         if config_file and os.path.exists(config_file):
             with open(config_file, 'r') as f:
@@ -57,6 +60,14 @@ class PerceptionNode(Node):
         else:
             self.get_logger().warn('未配置检测器，使用模拟检测')
             self.detector = None
+
+        # 初始化可视化器
+        if self.enable_viz:
+            self.visualizer = DetectionVisualizer(window_name="Perception Node - 3D Detection")
+            self.get_logger().info('可视化已启用')
+        else:
+            self.visualizer = None
+            self.get_logger().info('可视化已禁用')
 
         # 订阅话题
         self.depth_sub = self.create_subscription(
@@ -133,7 +144,7 @@ class PerceptionNode(Node):
                 max_depth=10.0
             )
 
-            if len(points) < 100:
+            if len(points) < 1000:
                 self.get_logger().warn('点云点数过少，跳过处理')
                 return
 
@@ -160,6 +171,13 @@ class PerceptionNode(Node):
                     detection_msg = self._create_detection_msg(detections, msg.header)
                     self.detections_pub.publish(detection_msg)
                     self.get_logger().info(f'检测到 {len(detections)} 个目标')
+
+                    # 可视化检测结果
+                    if self.enable_viz and self.visualizer is not None:
+                        try:
+                            self.visualizer.visualize(filtered_points, detections, block=False)
+                        except Exception as viz_error:
+                            self.get_logger().warn(f'可视化失败: {viz_error}')
 
             # 5. 发布处理后的点云
             pointcloud_msg = numpy_to_pointcloud2(
