@@ -13,6 +13,7 @@ setup(
         ('share/' + package_name + '/config', ['config/calibration_config.yaml']),
         ('share/' + package_name + '/launch', ['launch/calibration.launch.py']),
         ('share/' + package_name + '/launch', ['launch/system.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/visualizer.launch.py']),
         ('share/' + package_name + '/srv', [
             'srv/AddCalibrationSample.srv',
             'srv/ExecuteCalibration.srv',
@@ -39,6 +40,7 @@ setup(
     entry_points={
         'console_scripts': [
             'calibration_node = hand_eye_calibration.ros_nodes.calibration_node:main',
+            'visualizer_node = hand_eye_calibration.ros_nodes.visualizer_node:main',
             'test_node = hand_eye_calibration.ros_nodes.test_node:main',
         ],
     },

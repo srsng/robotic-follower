@@ -13,10 +13,11 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    """生成完整系统的 Launch 描述"""
+    """生成完整系统的 Launch Start"""
 
     # 声明启动参数
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
+    enable_visualization = LaunchConfiguration('enable_visualization', default='true')
 
     # 1. RealSense 相机启动
     realsense_launch = IncludeLaunchDescription(
@@ -71,7 +72,21 @@ def generate_launch_description():
         }]
     )
 
-    # 5. RViz 可视化
+    # 5. 相机可视化节点（RGB+深度图像显示与保存）
+    visualizer_node = Node(
+        package='hand_eye_calibration',
+        executable='visualizer_node',
+        name='visualizer_node',
+        output='screen',
+        parameters=[{
+            'enable_visualization': enable_visualization,
+            'save_dir': 'saved_images',
+            'rgb_topic': '/camera/color/image_raw',
+            'depth_topic': '/camera/depth/image_raw',
+        }]
+    )
+
+    # 6. RViz 可视化
     rviz_config_file = PathJoinSubstitution([
         FindPackageShare('hand_eye_calibration'),
         'config',
@@ -95,11 +110,17 @@ def generate_launch_description():
             default_value='false',
             description='Use simulation time'
         ),
+        DeclareLaunchArgument(
+            'enable_visualization',
+            default_value='true',
+            description='Enable RGB/Depth image visualization'
+        ),
 
         # 启动节点
         realsense_launch,
         calibration_node,
         perception_node,
         visual_follow_node,
-        rviz_node,  # 可选：取消注释以启动 RViz
+        visualizer_node,  # RGB/深度图像可视化
+        rviz_node, # RViz可视化
     ])
