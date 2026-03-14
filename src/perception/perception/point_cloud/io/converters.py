@@ -143,3 +143,59 @@ def open3d_to_numpy_pointcloud(pcd) -> np.ndarray:
         NumPy 点云数组 (N, 3)
     """
     return np.asarray(pcd.points)
+
+
+def save_to_bin(points: np.ndarray, output_path: str) -> None:
+    """
+    保存点云为 bin 格式（MMDetection3D 兼容）。
+
+    Args:
+        points: 点云数组 (N, 3)
+        output_path: 输出 bin 文件路径
+    """
+    points.astype(np.float32).tofile(output_path)
+
+
+def load_from_bin(bin_path: str, num_features: int = 3) -> np.ndarray:
+    """
+    从 bin 格式文件加载点云。
+
+    Args:
+        bin_path: bin 文件路径
+        num_features: 每个点的特征数，默认 3
+
+    Returns:
+        点云数组 (N, num_features)
+    """
+    return np.fromfile(bin_path, dtype=np.float32).reshape([-1, num_features])
+
+
+def save_to_pcd(points: np.ndarray, output_path: str) -> None:
+    """
+    保存点云为 PCD 格式。
+
+    Args:
+        points: 点云数组 (N, 3)
+        output_path: 输出 pcd 文件路径
+    """
+    import open3d as o3d
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
+    o3d.io.write_point_cloud(output_path, pcd)
+
+
+def load_from_pcd(pcd_path: str) -> np.ndarray:
+    """
+    从 PCD 文件加载点云。
+
+    Args:
+        pcd_path: pcd 文件路径
+
+    Returns:
+        点云数组 (N, 3)
+    """
+    import open3d as o3d
+
+    pcd = o3d.io.read_point_cloud(pcd_path)
+    return np.asarray(pcd.points)
