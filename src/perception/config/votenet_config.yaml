@@ -2,12 +2,12 @@
 
 # 点云滤波配置
 filtering:
-  voxel_size: 0.01
-  statistical_nb_neighbors: 20
+  voxel_size: 0.04
+  statistical_nb_neighbors: 100
   statistical_std_ratio: 2.0
-  passthrough_axis: 'z'
-  passthrough_min: 0.3
-  passthrough_max: 2.0
+  # passthrough_axis: 'z'
+  # passthrough_min: 0.3
+  # passthrough_max: 2.0
 
 # 密度计算配置
 density:

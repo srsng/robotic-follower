@@ -172,22 +172,24 @@ def create_default_filter_pipeline(config: Optional[dict] = None) -> FilterPipel
             'voxel_size': 0.01,
             'statistical_nb_neighbors': 20,
             'statistical_std_ratio': 2.0,
-            'passthrough_axis': 'z',
-            'passthrough_min': 0.3,
-            'passthrough_max': 2.0,
+            # 'passthrough_axis': 'z',
+            # 'passthrough_min': 0.3,
+            # 'passthrough_max': 2.0,
         }
 
-    filters = [
-        PassthroughFilter(
-            axis=config['passthrough_axis'],
-            min_limit=config['passthrough_min'],
-            max_limit=config['passthrough_max']
-        ),
-        VoxelFilter(voxel_size=config['voxel_size']),
-        StatisticalFilter(
+    filters = []
+    if 'passthrough_axis' in config and "passthrough_min" in config and "passthrough_max" in config:
+        filters.append(PassthroughFilter(
+                axis=config['passthrough_axis'],
+                min_limit=config['passthrough_min'],
+                max_limit=config['passthrough_max']
+        ),)
+    if 'voxel_size' in config:
+        filters.append(VoxelFilter(voxel_size=config['voxel_size']),)
+    if 'statistical_nb_neighbors' in config and 'statistical_std_ratio' in config:
+        filters.append(StatisticalFilter(
             nb_neighbors=config['statistical_nb_neighbors'],
             std_ratio=config['statistical_std_ratio']
-        ),
-    ]
+        ),)
 
     return FilterPipeline(filters)

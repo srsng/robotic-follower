@@ -87,9 +87,12 @@ class Detector3D:
             # 模拟检测器（用于测试）
             return self._mock_detect(points)
 
-        # 准备输入数据
+        # 准备输入数据 - 确保类型正确
+        points = points.astype(np.float32, copy=False)
+
         if density is not None:
             # 将密度作为额外通道
+            density = density.astype(np.float32, copy=False)
             points_with_density = np.concatenate(
                 [points, density[:, np.newaxis]], axis=1
             )
@@ -99,6 +102,10 @@ class Detector3D:
         # 执行推理
         try:
             from mmdet3d.apis import inference_detector
+
+            # 确保模型在正确的设备上
+            if 'cuda' in self.device and torch.cuda.is_available():
+                self.model.to(self.device)
 
             result = inference_detector(self.model, points_with_density)
 

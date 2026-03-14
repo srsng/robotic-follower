@@ -3,11 +3,11 @@
 # 点云滤波配置
 filtering:
   voxel_size: 0.01                    # 体素大小（米）
-  statistical_nb_neighbors: 20        # 统计滤波邻域点数
+  statistical_nb_neighbors: 100        # 统计滤波邻域点数
   statistical_std_ratio: 2.0          # 统计滤波标准差倍数
-  passthrough_axis: 'z'               # 直通滤波轴
-  passthrough_min: 0.3                # 直通滤波最小值（米）
-  passthrough_max: 2.0                # 直通滤波最大值（米）
+  # passthrough_axis: 'z'               # 直通滤波轴
+  # passthrough_min: 0.3                # 直通滤波最小值（米）
+  # passthrough_max: 2.0                # 直通滤波最大值（米）
 
 # 密度计算配置
 density:
