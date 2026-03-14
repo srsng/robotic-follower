@@ -1,0 +1,214 @@
+"""3D 目标检测推理模块（MMDetection3D 集成）。"""
+
+import numpy as np
+from typing import Optional, List, Dict
+import torch
+
+
+class Detector3D:
+    """3D 目标检测器封装（MMDetection3D）。"""
+
+    def __init__(
+        self,
+        config_file: str,
+        checkpoint_file: str,
+        device: str = 'cuda:0',
+        score_threshold: float = 0.3
+    ):
+        """
+        初始化 3D 检测器。
+
+        Args:
+            config_file: MMDetection3D 配置文件路径
+            checkpoint_file: 模型权重文件路径
+            device: 设备 ('cuda:0' 或 'cpu')
+            score_threshold: 检测置信度阈值
+        """
+        self.config_file = config_file
+        self.checkpoint_file = checkpoint_file
+        self.device = device
+        self.score_threshold = score_threshold
+        self.model = None
+
+        self._load_model()
+
+    def _load_model(self):
+        """加载 MMDetection3D 模型。"""
+        try:
+            from mmdet3d.apis import init_model
+
+            self.model = init_model(
+                self.config_file,
+                self.checkpoint_file,
+                device=self.device
+            )
+            print(f"✓ 成功加载 3D 检测模型: {self.checkpoint_file}")
+        except ImportError:
+            print("警告：MMDetection3D 未安装，使用模拟检测器")
+            self.model = None
+        except Exception as e:
+            print(f"警告：模型加载失败: {e}")
+            self.model = None
+
+    def detect(
+        self,
+        points: np.ndarray,
+        density: Optional[np.ndarray] = None
+    ) -> List[Dict]:
+        """
+        执行 3D 目标检测。
+
+        Args:
+            points: 输入点云 (N, 3)
+            density: 密度特征 (N,)，可选
+
+        Returns:
+            检测结果列表，每个结果包含：
+            - bbox: 3D 边界框 [x, y, z, dx, dy, dz, yaw]
+            - score: 置信度
+            - label: 类别标签
+        """
+        if self.model is None:
+            # 模拟检测器（用于测试）
+            return self._mock_detect(points)
+
+        # 准备输入数据
+        if density is not None:
+            # 将密度作为额外通道
+            points_with_density = np.concatenate(
+                [points, density[:, np.newaxis]], axis=1
+            )
+        else:
+            points_with_density = points
+
+        # 执行推理
+        try:
+            from mmdet3d.apis import inference_detector
+
+            result = inference_detector(self.model, points_with_density)
+
+            # 解析结果
+            detections = self._parse_mmdet3d_result(result)
+
+            # 过滤低置信度检测
+            detections = [
+                det for det in detections
+                if det['score'] >= self.score_threshold
+            ]
+
+            return detections
+
+        except Exception as e:
+            print(f"检测失败: {e}")
+            return []
+
+    def _parse_mmdet3d_result(self, result) -> List[Dict]:
+        """解析 MMDetection3D 检测结果。"""
+        detections = []
+
+        # 提取边界框、分数和标签
+        bboxes = result['boxes_3d'].tensor.cpu().numpy()
+        scores = result['scores_3d'].cpu().numpy()
+        labels = result['labels_3d'].cpu().numpy()
+
+        for bbox, score, label in zip(bboxes, scores, labels):
+            detections.append({
+                'bbox': bbox.tolist(),  # [x, y, z, dx, dy, dz, yaw]
+                'score': float(score),
+                'label': int(label)
+            })
+
+        return detections
+
+    def _mock_detect(self, points: np.ndarray) -> List[Dict]:
+        """模拟检测器（用于测试）。"""
+        # 计算点云中心作为模拟检测结果
+        center = np.mean(points, axis=0)
+
+        return [{
+            'bbox': [
+                float(center[0]),
+                float(center[1]),
+                float(center[2]),
+                0.3, 0.3, 0.3,  # 尺寸
+                0.0  # 朝向
+            ],
+            'score': 0.95,
+            'label': 0
+        }]
+
+
+class DensityFusionDetector(Detector3D):
+    """密度融合 3D 检测器（自定义 CGNL Neck）。"""
+
+    def __init__(
+        self,
+        config_file: str,
+        checkpoint_file: str,
+        device: str = 'cuda:0',
+        score_threshold: float = 0.3,
+        use_density_fusion: bool = True
+    ):
+        """
+        初始化密度融合检测器。
+
+        Args:
+            config_file: 配置文件路径
+            checkpoint_file: 权重文件路径
+            device: 设备
+            score_threshold: 置信度阈值
+            use_density_fusion: 是否使用密度融合
+        """
+        self.use_density_fusion = use_density_fusion
+        super().__init__(config_file, checkpoint_file, device, score_threshold)
+
+    def detect(
+        self,
+        points: np.ndarray,
+        density: Optional[np.ndarray] = None
+    ) -> List[Dict]:
+        """
+        执行密度融合 3D 检测。
+
+        Args:
+            points: 输入点云 (N, 3)
+            density: 密度特征 (N,)
+
+        Returns:
+            检测结果列表
+        """
+        if self.use_density_fusion and density is not None:
+            # 使用密度融合
+            return super().detect(points, density)
+        else:
+            # 标准检测
+            return super().detect(points, None)
+
+
+def create_detector_from_config(config: Dict) -> Detector3D:
+    """
+    从配置字典创建检测器。
+
+    Args:
+        config: 配置字典
+
+    Returns:
+        Detector3D 实例
+    """
+    detector_type = config.get('type', 'standard')
+
+    if detector_type == 'density_fusion':
+        return DensityFusionDetector(
+            config_file=config['config_file'],
+            checkpoint_file=config['checkpoint_file'],
+            device=config.get('device', 'cuda:0'),
+            score_threshold=config.get('score_threshold', 0.3),
+            use_density_fusion=config.get('use_density_fusion', True)
+        )
+    else:
+        return Detector3D(
+            config_file=config['config_file'],
+            checkpoint_file=config['checkpoint_file'],
+            device=config.get('device', 'cuda:0'),
+            score_threshold=config.get('score_threshold', 0.3)
+        )

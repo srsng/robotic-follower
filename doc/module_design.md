@@ -14,11 +14,11 @@
 
 本项目是一个基于 ROS2 Humble 的机器人感知系统，包含三个核心模块：
 
-| 模块 | 功能描述 | 状态 |
-|------|---------|------|
-| **perception** | 点云处理与 3D 目标检测 | ✅ 已实现 |
-| **coordinate_transform** | 坐标变换与 TF 树管理 | 🔄 开发中 |
-| **hand_ros2_calib** | 手眼标定 ROS2 集成 | 🔄 开发中 |
+| 模块                     | 功能描述               | 状态   |
+| ------------------------ | ---------------------- | ------ |
+| **perception**           | 点云处理与 3D 目标检测 | 🔄 TODO |
+| **coordinate_transform** | 坐标变换与 TF 树管理   | 🔄 TODO |
+| **hand_ros2_calib**      | 手眼标定 ROS2 集成     | 🔄 TODO |
 
 ---
 
@@ -96,21 +96,21 @@ perception/
 
 **1. 点云 I/O (io)**
 
-| 类/函数 | 功能 | 关键 API |
-|---------|------|----------|
-| `load_point_cloud()` | 加载点云文件 | 支持 .pcd, .ply, .xyz 等格式 |
-| `load_point_cloud_batch()` | 批量加载 | 列表输入 |
-| `depth_to_pointcloud()` | 深度图转点云 | 使用相机内参 |
-| `numpy_to_pointcloud2()` | NumPy 转 PointCloud2 | ROS2 消息转换 |
+| 类/函数                    | 功能                 | 关键 API                     |
+| -------------------------- | -------------------- | ---------------------------- |
+| `load_point_cloud()`       | 加载点云文件         | 支持 .pcd, .ply, .xyz 等格式 |
+| `load_point_cloud_batch()` | 批量加载             | 列表输入                     |
+| `depth_to_pointcloud()`    | 深度图转点云         | 使用相机内参                 |
+| `numpy_to_pointcloud2()`   | NumPy 转 PointCloud2 | ROS2 消息转换                |
 
 **2. 点云滤波器 (filters)**
 
-| 类 | 功能 | 典型参数 |
-|----|------|----------|
-| `VoxelFilter` | 体素下采样 | `voxel_size=0.01` |
-| `StatisticalFilter` | 统计去噪 | `nb_neighbors=20`, `std_ratio=2.0` |
-| `RadiusFilter` | 半径外点去除 | `radius=0.5`, `min_neighbors=5` |
-| `PassthroughFilter` | 直通滤波 | `axis_name='z'`, `min_limit=0.0`, `max_limit=3.0` |
+| 类                  | 功能         | 典型参数                                          |
+| ------------------- | ------------ | ------------------------------------------------- |
+| `VoxelFilter`       | 体素下采样   | `voxel_size=0.01`                                 |
+| `StatisticalFilter` | 统计去噪     | `nb_neighbors=20`, `std_ratio=2.0`                |
+| `RadiusFilter`      | 半径外点去除 | `radius=0.5`, `min_neighbors=5`                   |
+| `PassthroughFilter` | 直通滤波     | `axis_name='z'`, `min_limit=0.0`, `max_limit=3.0` |
 
 ```python
 # 滤波器使用示例
@@ -125,9 +125,9 @@ cleaned_points = filter2.filter(filtered_points)
 
 **3. 点云分割 (segmentation)**
 
-| 类 | 功能 | 算法 |
-|----|------|------|
-| `PlaneSegmentation` | 平面分割 | RANSAC |
+| 类                    | 功能     | 算法     |
+| --------------------- | -------- | -------- |
+| `PlaneSegmentation`   | 平面分割 | RANSAC   |
 | `EuclideanClustering` | 欧氏聚类 | k-d tree |
 
 ```python
@@ -143,10 +143,10 @@ result = segmenter.segment(points)
 
 **4. 特征提取 (features)**
 
-| 类/函数 | 功能 | 特点 |
-|---------|------|------|
+| 类/函数             | 功能         | 特点             |
+| ------------------- | ------------ | ---------------- |
 | `DensityCalculator` | 点云密度计算 | KDE + 多种核函数 |
-| `compute_density()` | 批量密度计算 | 支持归一化 |
+| `compute_density()` | 批量密度计算 | 支持归一化       |
 
 ```python
 # 密度计算示例
@@ -187,12 +187,12 @@ VoteNet → 投票 + Proposal 生成
 输出：3D 边界框 [center, size, heading, class_scores]
 ```
 
-| 类 | 功能 | 输入 | 输出 |
-|----|------|------|------|
-| `ObjectDetection3D` | 主检测网络 | 点云 + 密度 | 检测结果 |
-| `DensitySetAbstraction` | 密度集合抽象层 | 点云 | 下采样点 + 特征 |
-| `CompactGeneralizedNonLocal` | CGNL 模块 | 特征 | 融合特征 |
-| `VoteNetModule` | 投票网络 | 特征 | 3D proposals |
+| 类                           | 功能           | 输入        | 输出            |
+| ---------------------------- | -------------- | ----------- | --------------- |
+| `ObjectDetection3D`          | 主检测网络     | 点云 + 密度 | 检测结果        |
+| `DensitySetAbstraction`      | 密度集合抽象层 | 点云        | 下采样点 + 特征 |
+| `CompactGeneralizedNonLocal` | CGNL 模块      | 特征        | 融合特征        |
+| `VoteNetModule`              | 投票网络       | 特征        | 3D proposals    |
 
 ```python
 # 检测示例
@@ -228,24 +228,24 @@ ros2 run perception perception_node
 
 **话题接口**：
 
-| 话题类型 | 名称 | 方向 | 说明 |
-|---------|------|------|------|
-| `Image` | `/camera/depth/image_rect_raw` | 订阅 | 深度图像 |
-| `CameraInfo` | `/camera/camera_info` | 订阅 | 相机内参 |
-| `PointCloud2` | `/perception/processed_pointcloud` | 发布 | 处理后点云 |
-| `MarkerArray` | `/perception/detections` | 发布 | 3D 检测结果 |
+| 话题类型      | 名称                               | 方向 | 说明        |
+| ------------- | ---------------------------------- | ---- | ----------- |
+| `Image`       | `/camera/depth/image_rect_raw`     | 订阅 | 深度图像    |
+| `CameraInfo`  | `/camera/camera_info`              | 订阅 | 相机内参    |
+| `PointCloud2` | `/perception/processed_pointcloud` | 发布 | 处理后点云  |
+| `MarkerArray` | `/perception/detections`           | 发布 | 3D 检测结果 |
 
 ### 依赖库
 
-| 库 | 版本要求 | 用途 |
-|----|---------|------|
-| numpy | - | 数值计算 |
-| scipy | - | K-D Tree、KDE |
-| open3d | >=0.17.0 | 点云处理 |
-| scikit-learn | - | 聚类算法 |
-| opencv-python | - | 图像处理 |
-| torch | - | 深度学习 |
-| pyyaml | - | 配置文件 |
+| 库            | 版本要求 | 用途          |
+| ------------- | -------- | ------------- |
+| numpy         | -        | 数值计算      |
+| scipy         | -        | K-D Tree、KDE |
+| open3d        | >=0.17.0 | 点云处理      |
+| scikit-learn  | -        | 聚类算法      |
+| opencv-python | -        | 图像处理      |
+| torch         | -        | 深度学习      |
+| pyyaml        | -        | 配置文件      |
 
 ---
 
@@ -515,14 +515,14 @@ class CoordinateConverter:
 
 ### 依赖库
 
-| 库 | 用途 |
-|----|------|
-| rclpy | ROS2 Python 客户端库 |
-| tf2_ros | ROS2 TF 库 |
-| tf2_geometry_msgs | TF 几何消息转换 |
-| geometry_msgs | ROS2 几何消息 |
-| sensor_msgs | ROS2 传感器消息 |
-| numpy | 数值计算 |
+| 库                | 用途                 |
+| ----------------- | -------------------- |
+| rclpy             | ROS2 Python 客户端库 |
+| tf2_ros           | ROS2 TF 库           |
+| tf2_geometry_msgs | TF 几何消息转换      |
+| geometry_msgs     | ROS2 几何消息        |
+| sensor_msgs       | ROS2 传感器消息      |
+| numpy             | 数值计算             |
 
 ---
 
@@ -847,15 +847,15 @@ class VisualizationHelper:
 
 ### 依赖库
 
-| 库 | 用途 |
-|----|------|
-| rclpy | ROS2 Python 客户端库 |
-| cv_bridge | ROS2-OpenCV 桥接 |
-| geometry_msgs | ROS2 几何消息 |
-| sensor_msgs | ROS2 传感器消息 |
-| tf2_ros | ROS2 TF 库 |
-| opencv-python | 图像处理和标定 |
-| pyrealsense2 | RealSense 相机 |
+| 库            | 用途                 |
+| ------------- | -------------------- |
+| rclpy         | ROS2 Python 客户端库 |
+| cv_bridge     | ROS2-OpenCV 桥接     |
+| geometry_msgs | ROS2 几何消息        |
+| sensor_msgs   | ROS2 传感器消息      |
+| tf2_ros       | ROS2 TF 库           |
+| opencv-python | 图像处理和标定       |
+| pyrealsense2  | RealSense 相机       |
 
 ---
 
@@ -948,15 +948,15 @@ u, v = converter.robot_base_to_pixel(point_robot)
 
 ### 话题接口汇总
 
-| 模块 | 发布/订阅 | 话题名称 | 消息类型 |
-|------|----------|----------|----------|
-| **Perception** | 订阅 | `/camera/depth/image_rect_raw` | `sensor_msgs/Image` |
-| **Perception** | 订阅 | `/camera/camera_info` | `sensor_msgs/CameraInfo` |
-| **Perception** | 发布 | `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2` |
-| **Perception** | 发布 | `/perception/detections` | `visualization_msgs/MarkerArray` |
-| **Hand-Calib** | 订阅 | `/robot_joint_states` | `sensor_msgs/JointState` |
-| **Hand-Calib** | 订阅 | `/camera/color/image_raw` | `sensor_msgs/Image` |
-| **Hand-Calib** | 订阅 | `/camera/depth/image_raw` | `sensor_msgs/Image` |
+| 模块           | 发布/订阅 | 话题名称                           | 消息类型                         |
+| -------------- | --------- | ---------------------------------- | -------------------------------- |
+| **Perception** | 订阅      | `/camera/depth/image_rect_raw`     | `sensor_msgs/Image`              |
+| **Perception** | 订阅      | `/camera/camera_info`              | `sensor_msgs/CameraInfo`         |
+| **Perception** | 发布      | `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2`        |
+| **Perception** | 发布      | `/perception/detections`           | `visualization_msgs/MarkerArray` |
+| **Hand-Calib** | 订阅      | `/robot_joint_states`              | `sensor_msgs/JointState`         |
+| **Hand-Calib** | 订阅      | `/camera/color/image_raw`          | `sensor_msgs/Image`              |
+| **Hand-Calib** | 订阅      | `/camera/depth/image_raw`          | `sensor_msgs/Image`              |
 
 ### TF 树协作
 

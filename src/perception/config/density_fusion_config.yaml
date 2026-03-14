@@ -1,0 +1,32 @@
+# 感知系统配置文件 - 密度融合模型
+
+# 点云滤波配置
+filtering:
+  voxel_size: 0.01
+  statistical_nb_neighbors: 20
+  statistical_std_ratio: 2.0
+  passthrough_axis: 'z'
+  passthrough_min: 0.3
+  passthrough_max: 2.0
+
+# 密度计算配置
+density:
+  bandwidth: 0.05
+  kernel: 'gaussian'
+  use_inverse: true
+
+# 3D 检测器配置 - 密度融合
+detector:
+  type: 'density_fusion'
+  config_file: ''  # 使用自定义密度融合配置
+  checkpoint_file: ''  # 留空使用模拟检测器
+  device: 'cuda:0'
+  score_threshold: 0.3
+  use_density_fusion: true
+
+# ROS2 话题配置
+topics:
+  depth_image: '/camera/aligned_depth_to_color/image_raw'
+  camera_info: '/camera/color/camera_info'
+  output_pointcloud: '/perception/processed_pointcloud'
+  output_detections: '/perception/detections'

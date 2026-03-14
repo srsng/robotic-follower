@@ -12,6 +12,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/config', ['config/calibration_config.yaml']),
         ('share/' + package_name + '/launch', ['launch/calibration.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/system.launch.py']),
         ('share/' + package_name + '/srv', [
             'srv/AddCalibrationSample.srv',
             'srv/ExecuteCalibration.srv',
