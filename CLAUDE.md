@@ -474,16 +474,26 @@ realsense2_camera → perception → visual_follow → MoveIt2/PyMoveIt2 → dum
 ## TF 树结构
 
 ```
+world (世界坐标系)
+  ↓ (world_joint, fixed)
 base_link (机器人基座)
-  │
-  ├─ link1 ─ link2 ─ ... ─ link6 (机械臂关节) [动态TF]
-  │
-  └─ end_effector (末端执行器)
-        │
-        └─ camera_link (相机安装位置) [静态TF，手眼标定]
-              │
-              └─ camera_depth_optical_frame (深度相机光学坐标系) [静态TF]
+  ↓ (joint1-joint6, revolute) [动态TF，由 robot_state_publisher 发布]
+link1_1_1 ─ link2_1_1 ─ link3_1_1 ─ link4_1_1 ─ link5_1_1 ─ link6_1_1
+  ↓ (手眼变换) [动态TF，由 hand_eye_calibration 节点以10Hz周期发布]
+camera_link (相机安装位置，与 URDF 中的末端执行器 link6_1_1 关联)
+  ↓
+camera_color_optical_frame (深度相机光学坐标系，由 realsense2_camera 发布)
+camera_depth_optical_frame (深度相机光学坐标系，由 realsense2_camera 发布)
 ```
+
+### TF 发布方式说明
+
+| TF 变换 | 发布者 | 方式 |
+|-----------|---------|------|
+| world → base_link | static_transform_publisher | 静态 (固定) |
+| base_link → link6_1_1 | robot_state_publisher | 动态 (基于 joint_states) |
+| link6_1_1 → camera_link | hand_eye_calibration | 动态 (10Hz周期发布) |
+| camera_link → *_optical_frame | realsense2_camera | 静态/动态 (相机内部变换) |
 
 ## 设计文档
 

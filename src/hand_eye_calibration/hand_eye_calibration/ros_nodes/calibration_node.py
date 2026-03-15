@@ -2,13 +2,15 @@
 
 import sys
 import json
+import os
+import yaml
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String, Float64MultiArray
-from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
+from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped, Quaternion, Vector3, PoseStamped
 from cv_bridge import CvBridge
 
@@ -29,6 +31,12 @@ class CalibrationNode(Node):
 
     def __init__(self):
         super().__init__('hand_eye_calibration_node')
+
+        # 获取启动参数
+        self.declare_parameter('auto_load_calibration', False)
+        self.declare_parameter('calibration_file', 'results/calibration.yaml')
+        self.auto_load = self.get_parameter('auto_load_calibration').value
+        self.calibration_file = self.get_parameter('calibration_file').value
 
         # 加载配置
         self.config = self._get_default_config()
@@ -77,9 +85,18 @@ class CalibrationNode(Node):
         # 创建订阅
         self._create_subscriptions()
 
-        # 创建TF广播器
-        self.tf_broadcaster = StaticTransformBroadcaster(self)
-        self.dynamic_tf_broadcaster = TransformBroadcaster(self)
+        # 创建TF广播器（使用动态TF发布器以支持实时更新）
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+        # 当前标定结果（用于周期性发布TF）
+        self.current_calibration_result = None
+
+        # TF发布定时器（10Hz）
+        self.tf_timer = self.create_timer(0.1, self._publish_calibration_tf)
+
+        # 尝试自动加载标定结果
+        if self.auto_load:
+            self._try_load_calibration()
 
         self.get_logger().info("手眼标定节点已启动")
         self.get_logger().info("等待相机图像和机器人位姿...")
@@ -100,7 +117,7 @@ class CalibrationNode(Node):
             },
             'output': {
                 'save_path': 'results/calibration.yaml',
-                'tf_parent_frame': 'end_effector',
+                'tf_parent_frame': 'link6_1_1',  # URDF中实际存在的末端执行器坐标系
                 'tf_child_frame': 'camera_link',
             },
         }
@@ -308,6 +325,9 @@ class CalibrationNode(Node):
             self.get_logger().info(f"标定完成，误差: {result['error']:.6f}m")
             self.get_logger().info(f"标定结果已保存到 {save_path}")
 
+            # 保存当前标定结果用于周期性发布TF
+            self.current_calibration_result = result
+
         except Exception as e:
             self.get_logger().error(f"执行标定失败: {e}")
 
@@ -318,6 +338,7 @@ class CalibrationNode(Node):
         success = self.manager.reset()
         if success:
             self.get_logger().info("标定已重置")
+            self.current_calibration_result = None  # 清除标定结果
         self._publish_status()
 
     def _publish_status(self):
@@ -328,8 +349,12 @@ class CalibrationNode(Node):
         msg.data = status_str
         self.status_pub.publish(msg)
 
-    def _publish_transform(self, result: dict):
-        """发布手眼变换TF。"""
+    def _publish_calibration_tf(self):
+        """周期性发布手眼变换TF。"""
+        if self.current_calibration_result is None:
+            return
+
+        result = self.current_calibration_result
         transform = TransformStamped()
         transform.header.stamp = self.get_clock().now().to_msg()
         transform.header.frame_id = self.config['output']['tf_parent_frame']
@@ -345,7 +370,39 @@ class CalibrationNode(Node):
         transform.transform.rotation.w = result['quaternion'][3]
 
         self.tf_broadcaster.sendTransform(transform)
-        self.get_logger().info("已发布手眼变换TF")
+
+    def _try_load_calibration(self):
+        """尝试加载已保存的标定结果。"""
+        if not os.path.exists(self.calibration_file):
+            self.get_logger().warn(f"标定文件不存在: {self.calibration_file}")
+            return
+
+        try:
+            with open(self.calibration_file, 'r', encoding='utf-8') as f:
+                result = yaml.safe_load(f)
+
+            # 验证结果格式
+            required_keys = ['translation_vector', 'quaternion']
+            if not all(key in result for key in required_keys):
+                self.get_logger().error("标定文件格式错误")
+                return
+
+            # 转换列表为numpy数组
+            if isinstance(result['translation_vector'], list):
+                result['translation_vector'] = np.array(result['translation_vector'])
+            if isinstance(result['quaternion'], list):
+                result['quaternion'] = np.array(result['quaternion'])
+
+            self.current_calibration_result = result
+            self.get_logger().info(f"已加载标定结果: {self.calibration_file}")
+            self.get_logger().info(
+                f"手眼变换: t=[{result['translation_vector'][0]:.4f}, "
+                f"{result['translation_vector'][1]:.4f}, "
+                f"{result['translation_vector'][2]:.4f}]"
+            )
+
+        except Exception as e:
+            self.get_logger().error(f"加载标定结果失败: {e}")
 
 
 def main(args=None):

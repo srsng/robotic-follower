@@ -75,37 +75,64 @@
 
 ## TF 树结构
 
-手眼标定模块发布以下坐标变换：
+手眼标定模块发布以下坐标变换（与 ros2_dummy_arm_810 的 URDF 结构保持一致）：
 
 ```
-end_effector (机械臂末端)
-  │
-  └─ camera_link (相机安装位)
-        │
-        └─ camera_depth_optical_frame (深度相机光学坐标系)
+world (世界坐标系)
+  ↓ (world_joint, fixed) [由 static_transform_publisher 发布]
+base_link (机器人基座)
+  ↓ (joint1-j-joint6, revolute) [动态TF，由 robot_state_publisher 发布]
+link1_1_1 ─ link2_1_1 ─ link3_1_1 ─ link4_1_1 ─ link5_1_1 ─ link6_1_1
+  ↓ (手眼变换) [动态TF，由 hand_eye_calibration 节点以 10Hz 周期发布]
+camera_link (相机安装位置，与 URDF 中的 link6_1_1 关联）
+  ↓
+camera_color_optical_frame (深度相机光学坐标系，由 realsense2_camera 发布)
+camera_depth_optical_frame (深度相机光学坐标系，由 realsense2_camera 发布)
 ```
 
-标定结果作为静态TF发布。本模块同时承担标定结果的持久化管理和TF自动发布职责（原坐标变换模块的TF发布功能已合并到本模块）。
+### TF 发布方式
+
+| TF 变换 | 发布者 | 方式 |
+|-----------|--------|------|
+| world → base_link | static_transform_publisher | 静态 (固定) |
+| base_link → link6_1_1 | robot_state_publisher | 动态 (基于 joint_states) |
+| link6_1_1 → camera_link | hand_eye_calibration | 动态 (10Hz 周期发布) |
+| camera_link → *_optical_frame | realsense2_camera | 静态/动态 (相机内部变换) |
+
+### 坐标系命名规范
+
+| 坐标系名称 | 来源 | 说明 |
+|------------|------|------|
+| `world` | 静态 TF | 世界参考坐标系 |
+| `base_link` | URDF | 机器人基座 |
+| `link6_1_1` | URDF | 末端执行器（与 URDF 一致） |
+| `camera_link` | 手眼标定 | 相机安装坐标系 |
+| `*_optical_frame` | realsense2_camera | 相机光学坐标系 |
 
 ### 标定结果TF自动发布
 
-标定节点启动时，自动检查 `results/calibration.yaml` 是否存在：
-- **存在**：加载标定结果并立即发布为静态TF，无需重新标定
-- **不存在**：等待用户通过服务接口执行标定流程
+标定节点启动时，根据 `auto_load_calibration` 参数决定行为：
+
+**启用自动加载（auto_load_calibreation=True）**：
+- 检查 `results/calibration.yaml` 是否存在
+- **存在**：加载标定结果并以 10Hz 周期发布为动态 TF
+- **不存在**：记录警告，等待用户通过服务接口执行标定流程
+
+**禁用自动加载**：
+- 直接等待用户通过服务接口执行标定流程
 
 ```yaml
 # results/calibration.yaml 格式
-hand_eye_transform:
-  parent_frame: "end_effector"
-  child_frame: "camera_link"
-  translation: [x, y, z]        # 米
-  quaternion: [x, y, z, w]      # 四元数
-  rotation_matrix: [[...], ...]  # 3x3旋转矩阵（备用）
-  calibration_error: 0.002       # 标定误差（米）
-  calibration_date: "2026-03-13"
+translation_vector: [x, y, z]        # 米
+quaternion: [x, y, z, w]      # 四元数
+rotation_matrix: [[...], ...]  # 3x3旋转矩阵（备用）
+error: 0.002       # 标定误差（米）
 ```
 
-这确保系统启动后无需每次重新标定，手眼变换TF即可立即可用。
+使用动态 TF（TransformBroadcaster）而非静态 TF（StaticTransformBroadcaster）的原因：
+- 时间戳持续更新，避免 TF 查询超时
+- 符合实时系统中的 TF 传播规范
+- 与 ros2_dummy_arm_810 项目保持一致
 
 ## 目录结构
 
@@ -519,12 +546,12 @@ validation:
 
 output:
   save_path: "results/calibration.yaml"
-  tf_parent_frame: "end_effector"
+  tf_parent_frame: "link6_1_1"  # 与 URDF 一致
   tf_child_frame: "camera_link"
 
 robot:
   base_frame: "base_link"
-  end_effector_frame: "end_effector"
+  end_effector_frame: "link6_1_1"  # 与 URDF 一致
   joint_state_topic: "/robot/joint_states"
 
 camera:

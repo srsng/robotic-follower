@@ -19,6 +19,15 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     enable_visualization = LaunchConfiguration('enable_visualization', default='true')
 
+    # 0. world → base_link 静态 TF（与 ros2_dummy_arm_810 标准保持一致）
+    static_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="static_transform_publisher",
+        output="screen",
+        arguments=["0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "world", "base_link"],
+    )
+
     # 1. RealSense 相机启动
     realsense_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -117,6 +126,7 @@ def generate_launch_description():
         ),
 
         # 启动节点
+        static_tf,  # world → base_link 静态 TF
         realsense_launch,
         calibration_node,
         perception_node,
