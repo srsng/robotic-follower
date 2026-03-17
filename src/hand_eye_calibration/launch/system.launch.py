@@ -43,6 +43,7 @@ def generate_launch_description():
             'enable_depth': 'true',
             'depth_module.profile': '640x480x30',
             'rgb_camera.profile': '640x480x30',
+            'camera_namespace': '',
         }.items()
     )
 
@@ -91,7 +92,7 @@ def generate_launch_description():
             'enable_visualization': enable_visualization,
             'save_dir': 'saved_images',
             'rgb_topic': '/camera/color/image_raw',
-            'depth_topic': '/camera/depth/image_raw',
+            'depth_topic': '/camera/aligned_depth_to_color/image_raw',
         }]
     )
 

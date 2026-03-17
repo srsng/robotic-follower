@@ -1,6 +1,7 @@
 """相机图像可视化节点，支持RGB和深度图像显示与保存。"""
 
 import os
+import sys
 import cv2
 import numpy as np
 import rclpy
@@ -19,9 +20,9 @@ class VisualizerNode(Node):
 
         # 读取参数
         self.declare_parameter('enable_visualization', True)
-        self.declare_parameter('save_dir', '~/ros2_ws/saved_images')
+        self.declare_parameter('save_dir', '/home/srsnn/ros2_ws/data/saved_images')
         self.declare_parameter('rgb_topic', '/camera/color/image_raw')
-        self.declare_parameter('depth_topic', '/camera/depth/image_raw')
+        self.declare_parameter('depth_topic', '/camera/aligned_depth_to_color/image_raw')
         self.declare_parameter('display_window_name', 'Hand Eye Calibration Visualizer')
 
         self.enable_visualization = bool(self.get_parameter('enable_visualization').value)
@@ -41,18 +42,19 @@ class VisualizerNode(Node):
         # CV桥接
         self.bridge = CvBridge()
 
-        # 图像缓存
+        # 图像缓存（用于保存功能）
         self.current_rgb = None
         self.current_depth = None
+
+        # 创建窗口
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
 
         # 创建订阅
         self._create_subscriptions()
 
-        # 创建可视化窗口
-        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(self.window_name, 1280, 640)
-
         self.get_logger().info("可视化节点已启动")
+        self.get_logger().info(f"RGB 话题: {self.rgb_topic}")
+        self.get_logger().info(f"深度话题: {self.depth_topic}")
         self.get_logger().info("按 'S' 键保存当前图像，按 'Q' 或 'ESC' 键退出")
 
     def _create_subscriptions(self):
@@ -76,97 +78,125 @@ class VisualizerNode(Node):
     def _rgb_callback(self, msg: Image):
         """RGB图像回调。"""
         try:
-            self.current_rgb = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            # 转换图像
+            rgb_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            self.current_rgb = rgb_image.copy()
+
+            # 构建显示图像
+            if self.current_depth is not None:
+                # 同时有深度图像，并排显示
+                depth_normalized = cv2.normalize(
+                    self.current_depth, None, 0, 255, cv2.NORM_MINMAX
+                )
+                depth_display = cv2.applyColorMap(
+                    depth_normalized.astype(np.uint8), cv2.COLORMAP_JET
+                )
+
+                # 添加标签
+                display_rgb = rgb_image.copy()
+                cv2.putText(
+                    display_rgb, "RGB", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
+                )
+                display_depth = depth_display.copy()
+                cv2.putText(
+                    display_depth, "DEPTH", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
+                )
+
+                # 水平拼接
+                display_image = np.hstack([display_rgb, display_depth])
+            else:
+                # 只有RGB图像
+                display_image = rgb_image.copy()
+                cv2.putText(
+                    display_image, "RGB (Depth not available)", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
+                )
+
+            # 显示图像
+            cv2.imshow(self.window_name, display_image)
+
+            # 处理键盘输入
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q') or key == 27:  # 'q' 或 ESC
+                self.get_logger().info("用户请求退出")
+                cv2.destroyAllWindows()
+                rclpy.shutdown()
+                sys.exit(0)
+            elif key == ord('s') or key == ord('S'):  # 's' 或 'S'
+                self._save_images()
+
         except Exception as e:
-            self.get_logger().error(f"RGB图像转换失败: {e}")
+            self.get_logger().error(f"RGB图像处理失败: {e}")
 
     def _depth_callback(self, msg: Image):
         """深度图像回调。"""
         try:
-            # 深度图像通常是16位单通道
-            self.current_depth = self.bridge.imgmsg_to_cv2(msg, "16UC1")
-        except Exception as e:
-            self.get_logger().error(f"深度图像转换失败: {e}")
+            # 转换深度图像
+            depth_image = self.bridge.imgmsg_to_cv2(msg, "16UC1")
 
-    def run(self):
-        """运行可视化循环。"""
-        if not self.enable_visualization:
-            return
+            # 检查是否需要修正（防止水平重影）
+            # 16UC1 格式每个像素占 2 字节
+            expected_step = msg.width * 2
+            if msg.step != expected_step:
+                self.get_logger().warn_once(
+                    f"深度图像步长异常: width={msg.width}, step={msg.step}, "
+                    f"期望={expected_step}。可能存在水平重影，尝试修正..."
+                )
+                # 手动从数据重建图像，忽略异常步长
+                data_array = np.frombuffer(msg.data, dtype=np.uint16)
+                depth_image = data_array.reshape(msg.height, msg.width).copy()
 
-        try:
-            while rclpy.ok():
-                # 处理ROS回调
-                rclpy.spin_once(self, timeout_sec=0.01)
+            self.current_depth = depth_image
 
-                # 显示图像
-                self._display_images()
-
-                # 处理键盘输入
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q') or key == 27:  # 'q' 或 ESC
-                    self.get_logger().info("用户请求退出")
-                    break
-                elif key == ord('s') or key == ord('S'):  # 's' 或 'S'
-                    self._save_images()
-
-        except KeyboardInterrupt:
-            self.get_logger().info("收到中断信号，退出")
-        finally:
-            cv2.destroyAllWindows()
-
-    def _display_images(self):
-        """显示RGB和深度图像。"""
-        if self.current_rgb is None and self.current_depth is None:
-            return
-
-        display_image = None
-
-        if self.current_rgb is not None and self.current_depth is not None:
-            # 同时有RGB和深度图像，并排显示
-            # 深度图像归一化到0-255用于显示
+            # 归一化用于显示
             depth_normalized = cv2.normalize(
-                self.current_depth, None, 0, 255, cv2.NORM_MINMAX
+                depth_image, None, 0, 255, cv2.NORM_MINMAX
             )
             depth_display = cv2.applyColorMap(
                 depth_normalized.astype(np.uint8), cv2.COLORMAP_JET
             )
 
-            # 添加标签
-            cv2.putText(
-                self.current_rgb, "RGB", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
-            )
-            cv2.putText(
-                depth_display, "DEPTH", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
-            )
+            # 构建显示图像
+            if self.current_rgb is not None:
+                # 同时有RGB图像，并排显示
+                display_rgb = self.current_rgb.copy()
+                cv2.putText(
+                    display_rgb, "RGB", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
+                )
+                display_depth = depth_display.copy()
+                cv2.putText(
+                    display_depth, "DEPTH", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
+                )
 
-            # 水平拼接
-            display_image = np.hstack([self.current_rgb, depth_display])
+                # 水平拼接
+                display_image = np.hstack([display_rgb, display_depth])
+            else:
+                # 只有深度图像
+                display_image = depth_display.copy()
+                cv2.putText(
+                    display_image, "DEPTH (RGB not available)", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
+                )
 
-        elif self.current_rgb is not None:
-            # 只有RGB图像
-            display_image = self.current_rgb.copy()
-            cv2.putText(
-                display_image, "RGB (Depth not available)", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
-            )
-
-        elif self.current_depth is not None:
-            # 只有深度图像
-            depth_normalized = cv2.normalize(
-                self.current_depth, None, 0, 255, cv2.NORM_MINMAX
-            )
-            display_image = cv2.applyColorMap(
-                depth_normalized.astype(np.uint8), cv2.COLORMAP_JET
-            )
-            cv2.putText(
-                display_image, "DEPTH (RGB not available)", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2
-            )
-
-        if display_image is not None:
+            # 显示图像
             cv2.imshow(self.window_name, display_image)
+
+            # 处理键盘输入
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q') or key == 27:  # 'q' 或 ESC
+                self.get_logger().info("用户请求退出")
+                cv2.destroyAllWindows()
+                rclpy.shutdown()
+                sys.exit(0)
+            elif key == ord('s') or key == ord('S'):  # 's' 或 'S'
+                self._save_images()
+
+        except Exception as e:
+            self.get_logger().error(f"深度图像处理失败: {e}")
 
     def _save_images(self):
         """保存当前RGB和深度图像。"""
@@ -200,9 +230,15 @@ def main(args=None):
     """主函数。"""
     rclpy.init(args=args)
     node = VisualizerNode()
-    node.run()
-    node.destroy_node()
-    rclpy.shutdown()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("收到中断信号，退出")
+    finally:
+        cv2.destroyAllWindows()
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':

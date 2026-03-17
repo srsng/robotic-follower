@@ -30,7 +30,7 @@ def generate_launch_description():
 
     depth_topic_arg = DeclareLaunchArgument(
         'depth_topic',
-        default_value='/camera/depth/image_raw',
+        default_value='/camera/aligned_depth_to_color/image_raw',
         description='深度图像话题'
     )
 

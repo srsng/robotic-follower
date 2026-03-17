@@ -24,6 +24,7 @@ from hand_eye_calibration.calibration import (
     ExtrinsicCalibrator,
     CalibrationValidator,
 )
+from hand_eye_calibration.robot import RobotInterface
 
 
 class CalibrationNode(Node):
@@ -79,6 +80,14 @@ class CalibrationNode(Node):
         self.current_image = None
         self.current_robot_pose = None
 
+        # 机器人接口（用于主动控制）
+        self.robot_interface = RobotInterface(
+            node=self,
+            base_frame=self.config.get('robot', {}).get('base_frame', 'base_link'),
+            end_effector_frame=self.config.get('robot', {}).get('end_effector_frame', 'link6_1_1'),
+            group_name=self.config.get('robot', {}).get('group_name', 'dummy_arm'),
+        )
+
         # 创建话题
         self._create_topics()
 
@@ -114,6 +123,11 @@ class CalibrationNode(Node):
             },
             'validation': {
                 'max_error': 0.01,
+            },
+            'robot': {
+                'base_frame': 'base_link',
+                'end_effector_frame': 'link6_1_1',
+                'group_name': 'dummy_arm',
             },
             'output': {
                 'save_path': 'results/calibration.yaml',
@@ -188,6 +202,14 @@ class CalibrationNode(Node):
             10
         )
 
+        # 机器人控制（移动到目标位姿）
+        self.move_to_pose_sub = self.create_subscription(
+            PoseStamped,
+            '/hand_eye_calibration/move_to_pose',
+            self._move_to_pose_callback,
+            10
+        )
+
     def _camera_info_callback(self, msg: CameraInfo):
         """相机信息回调。"""
         # 提取相机内参
@@ -230,12 +252,12 @@ class CalibrationNode(Node):
     ) -> np.ndarray:
         """四元数转旋转矩阵。"""
         # 归一化四元数
-        norm = np.sqrt(x*x + y*y + z*z + w*w)
+        norm = np.sqrt(x**2 + y**2 + z**2 + w**2)
         if norm == 0:
             return np.eye(3)
         x, y, z, w = x/norm, y/norm, z/norm, w/norm
 
-        xx, yy, zz = x*x, y*y, z*z
+        xx, yy, zz = x**2, y**2, z**2
         xy, xz, yz = x*y, x*z, y*z
         xw, yw, zw = x*w, y*w, z*w
 
@@ -340,6 +362,35 @@ class CalibrationNode(Node):
             self.get_logger().info("标定已重置")
             self.current_calibration_result = None  # 清除标定结果
         self._publish_status()
+
+    def _move_to_pose_callback(self, msg: PoseStamped):
+        """移动到目标位姿（用于标定）。"""
+        try:
+            position = [
+                msg.pose.position.x,
+                msg.pose.position.y,
+                msg.pose.position.z
+            ]
+            orientation = [
+                msg.pose.orientation.x,
+                msg.pose.orientation.y,
+                msg.pose.orientation.z,
+                msg.pose.orientation.w
+            ]
+
+            # 假设 robot_interface 已在节点中初始化
+            # 需要在 __init__ 中创建 robot_interface 实例
+            if hasattr(self, 'robot_interface') and self.robot_interface:
+                success = self.robot_interface.move_to_pose(position, orientation)
+                if success:
+                    self.get_logger().info('已移动到目标位姿')
+                else:
+                    self.get_logger().warn('移动失败')
+            else:
+                self.get_logger().warn('robot_interface 未初始化')
+
+        except Exception as e:
+            self.get_logger().error(f'移动失败: {e}')
 
     def _publish_status(self):
         """发布标定状态。"""
