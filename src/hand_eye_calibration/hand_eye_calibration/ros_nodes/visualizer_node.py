@@ -20,7 +20,7 @@ class VisualizerNode(Node):
 
         # 读取参数
         self.declare_parameter('enable_visualization', True)
-        self.declare_parameter('save_dir', '/home/srsnn/ros2_ws/data/saved_images')
+        self.declare_parameter('save_dir', './data/saved_images')
         self.declare_parameter('rgb_topic', '/camera/color/image_raw')
         self.declare_parameter('depth_topic', '/camera/aligned_depth_to_color/image_raw')
         self.declare_parameter('display_window_name', 'Hand Eye Calibration Visualizer')

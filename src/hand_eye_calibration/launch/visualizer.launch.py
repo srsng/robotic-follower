@@ -18,7 +18,7 @@ def generate_launch_description():
 
     save_dir_arg = DeclareLaunchArgument(
         'save_dir',
-        default_value='saved_images',
+        default_value='./data/saved_images',
         description='图像保存目录'
     )
 

@@ -90,7 +90,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'enable_visualization': enable_visualization,
-            'save_dir': 'saved_images',
+            'save_dir': './data/saved_images',
             'rgb_topic': '/camera/color/image_raw',
             'depth_topic': '/camera/aligned_depth_to_color/image_raw',
         }]
