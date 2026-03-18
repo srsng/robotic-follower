@@ -456,8 +456,8 @@ realsense2_camera → perception → visual_follow → MoveIt2/PyMoveIt2 → dum
 | `/camera/depth/image_rect_raw`             | `sensor_msgs/Image`            | realsense2_camera    |
 | `/camera/aligned_depth_to_color/image_raw` | `sensor_msgs/Image`            | realsense2_camera    |
 | `/camera/color/camera_info`                | `sensor_msgs/CameraInfo`       | realsense2_camera    |
-| `/perception/processed_pointcloud`          | `sensor_msgs/PointCloud2`      | perception           |
-| `/perception/detections`                    | `vision_msgs/Detection3DArray` | perception           |
+| `/perception/processed_pointcloud`         | `sensor_msgs/PointCloud2`      | perception           |
+| `/perception/detections`                   | `vision_msgs/Detection3DArray` | perception           |
 | `/joint_states`                            | `sensor_msgs/JointState`       | dummy_arm_controller |
 
 ### 服务汇总
@@ -488,12 +488,12 @@ camera_depth_optical_frame (深度相机光学坐标系，由 realsense2_camera 
 
 ### TF 发布方式说明
 
-| TF 变换 | 发布者 | 方式 |
-|-----------|---------|------|
-| world → base_link | static_transform_publisher | 静态 (固定) |
-| base_link → link6_1_1 | robot_state_publisher | 动态 (基于 joint_states) |
-| link6_1_1 → camera_link | hand_eye_calibration | 动态 (10Hz周期发布) |
-| camera_link → *_optical_frame | realsense2_camera | 静态/动态 (相机内部变换) |
+| TF 变换                       | 发布者                     | 方式                     |
+| ----------------------------- | -------------------------- | ------------------------ |
+| world → base_link             | static_transform_publisher | 静态 (固定)              |
+| base_link → link6_1_1         | robot_state_publisher      | 动态 (基于 joint_states) |
+| link6_1_1 → camera_link       | hand_eye_calibration       | 动态 (10Hz周期发布)      |
+| camera_link → *_optical_frame | realsense2_camera          | 静态/动态 (相机内部变换) |
 
 ## 设计文档
 
@@ -502,15 +502,5 @@ camera_depth_optical_frame (深度相机光学坐标系，由 realsense2_camera 
 | 文档                                     | 说明               |
 | ---------------------------------------- | ------------------ |
 | `doc/modules/README.md`                  | 模块总览与系统运行 |
-| `doc/modules/02_perception.md`           | 感知模块设计       |
 | `doc/modules/01_hand_eye_calibration.md` | 手眼标定模块设计   |
-
-## 性能指标
-
-| 指标类别   | 指标       | 目标值    |
-| ---------- | ---------- | --------- |
-| 相机采集   | 帧率       | >= 30 FPS |
-| 感知       | mAP@0.25   | > 60%     |
-| 感知       | 推理速度   | > 5 FPS   |
-| 机械臂执行 | 控制频率   | 100 Hz    |
-| 系统整体   | 端到端延迟 | < 200 ms  |
+| `doc/modules/02_perception.md`           | 感知模块设计       |

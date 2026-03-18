@@ -6,142 +6,70 @@
 
 系统采用精简架构，充分复用 ROS2 社区成熟方案，自研代码聚焦于核心创新点：
 
-| 组件                 | 类型           | 说明                                       |
-| -------------------- | -------------- | ------------------------------------------ |
-| realsense2_camera    | 外部包(apt)    | 相机采集，替代自研驱动                     |
-| perception           | 自研包         | 感知模块：点云处理 + 3D检测(MMDetection3D) |
-| hand_eye_calibration | 自研包         | 手眼标定 + TF自动发布                      |
-| ros2_dummy_arm_810   | 自研包         | 机械臂驱动 + MoveIt2运动规划               |
-| visual_follow        | 自研包(待实现) | 视觉跟随协调器（胶水代码）                 |
+| 组件                 | 类型        | 说明                                       |
+| -------------------- | ----------- | ------------------------------------------ |
+| realsense2_camera    | 外部包(apt) | 相机采集，替代自研驱动                     |
+| perception           | 自研包      | 感知模块：点云处理 + 3D检测(MMDetection3D) |
+| hand_eye_calibration | 自研包      | 手眼标定 + TF自动发布                      |
+| ros2_dummy_arm_810   | 外部包(git) | 机械臂驱动 + MoveIt2运动规划               |
+| visual_follow        | 自研包      | 视觉跟随协调器                             |
 
-## 文档列表
+## 详细文档
 
-| 序号 | 模块         | 文档                                                       | 说明                                |
-| ---- | ------------ | ---------------------------------------------------------- | ----------------------------------- |
-| 01   | 手眼标定模块 | [01_hand_eye_calibration.md](./01_hand_eye_calibration.md) | 手眼标定、结果保存与TF自动发布      |
-| 02   | 感知模块     | [02_perception.md](./02_perception.md)                     | 点云处理与3D目标检测(MMDetection3D) |
+| 模块         | 文档                                                       | 说明                                |
+| ------------ | ---------------------------------------------------------- | ----------------------------------- |
+| 手眼标定模块 | [01_hand_eye_calibration.md](./01_hand_eye_calibration.md) | 手眼标定、结果保存与TF自动发布      |
+| 感知模块     | [02_perception.md](./02_perception.md)                     | 点云处理与3D目标检测(MMDetection3D) |
 
 > **注**：相机采集使用 `realsense2_camera` 官方包（通过launch文件配置）；机械臂驱动/运动规划/可视化/仿真由 `ros2_dummy_arm_810` 及 MoveIt2 提供，不需要单独的设计文档；坐标变换直接使用 `tf2_ros` 标准API。
 
-## 系统依赖
-
-### 硬件依赖
+## 硬件依赖
 
 | 设备     | 型号                       | 接口        |
 | -------- | -------------------------- | ----------- |
 | 深度相机 | Intel RealSense D435       | USB 3.0     |
 | 机械臂   | Dummy/Dobot 六自由度机械臂 | USB 2.0/3.0 |
 
-### 软件依赖
+## 软件依赖
 
-#### ROS2 Humble
+详细的依赖安装命令请参考 [README.md](../README.md#安装依赖)。
 
+### USB 设备权限配置
+
+**查找设备 VID 和 PID：**
 ```bash
-# 相机采集
-sudo apt install ros-humble-realsense2-camera
-sudo apt install ros-humble-realsense2-description
-
-# 运动规划
-sudo apt install ros-humble-moveit
-sudo apt install ros-humble-moveit-ros-planning-interface
-sudo apt install ros-humble-moveit-planners-ompl
-sudo apt install ros-humble-moveit-runtime
-sudo apt install ros-humble-moveit-servo
-
-# 消息与工具
-sudo apt install ros-humble-vision-msgs
-sudo apt install ros-humble-tf2-ros
-sudo apt install ros-humble-tf2-geometry-msgs
-sudo apt install ros-humble-sensor-msgs
-sudo apt install ros-humble-geometry-msgs
-sudo apt install ros-humble-cv-bridge
-
-# 可视化和仿真
-sudo apt install ros-humble-rviz2
-sudo apt install ros-humble-gazebo-ros
-sudo apt install ros-humble-gazebo-ros-pkgs
-sudo apt install ros-humble-xacro
+lsusb
 ```
 
-#### Python依赖
+找到类似这样的输出：
+```
+Bus 002 Device 007: ID 1209:0d32 Generic ODrive Robotics ODrive v3
+```
 
+其中 `1209` 是 VID，`0d32` 是 PID。
+
+**创建 udev 规则：**
 ```bash
-# 核心库
-pip3 install torch torchvision
-pip3 install open3d
-pip3 install scipy scikit-learn
-pip3 install numpy
-pip3 install opencv-python
-pip3 install pyyaml
-
-# mmdet3d 及依赖
-pip install -U openmim
-mim install mmengine mmcv mmdet
-pip3 install -e /home/srsnn/ws/py/mmdetection3d
+sudo nano /etc/udev/rules.d/99-dummy-arm.rules
 ```
 
-### USB 设备权限
-
-#### 机械臂 USB 规则
-
-创建 `/etc/udev/rules.d/99-robot-arm.rules`：
-
+添加以下内容（替换为你的 VID 和 PID）：
 ```
-SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="0D31", MODE="0666"
-SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="0D32", MODE="0666"
-SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="0D33", MODE="0666"
+# Rule for Dummy Arm Controller
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0d32", MODE="0666"
 ```
 
+**使规则生效：**
 ```bash
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
+重新插拔 USB 设备。
+
 ## 编译与运行
 
-### 编译所有模块
-
-```bash
-cd ~/ros2_ws
-source /opt/ros/humble/setup.bash
-colcon build --symlink-install
-source install/setup.bash
-```
-
-### 运行完整系统
-
-需要 4 个终端：
-
-```bash
-# 终端1: 启动相机（realsense2_camera）
-ros2 launch realsense2_camera rs_launch.py \
-  align_depth.enable:=true \
-  depth_module.profile:=640x480x30
-
-# 终端2: 启动机械臂 + MoveIt + RViz
-ros2 launch dummy_moveit_config demo_real_arm.launch.py
-
-# 终端3: 启动感知模块
-ros2 launch perception perception.launch.py
-
-# 终端4: 启动视觉跟随协调器
-ros2 launch visual_follow follow.launch.py
-```
-
-### 首次标定（仅需执行一次）
-
-```bash
-# 启动标定节点
-ros2 launch hand_eye_calibration calibration.launch.py
-
-# 移动机械臂至不同位姿，每次调用添加样本
-ros2 service call /hand_eye_calibration/add_sample hand_eye_calibration/srv/AddCalibrationSample
-
-# 采集足够样本后执行标定
-ros2 service call /hand_eye_calibration/execute hand_eye_calibration/srv/ExecuteCalibration
-```
-
-标定完成后结果保存到 `results/calibration.yaml`，后续启动标定节点时自动加载并发布TF。
+详细的编译和运行命令请参考 [README.md](../README.md#快速开始)。
 
 ## 系统话题汇总
 
@@ -177,16 +105,26 @@ ros2 service call /hand_eye_calibration/execute hand_eye_calibration/srv/Execute
 ## TF树结构
 
 ```
+world (世界坐标系)
+  ↓ (world_joint, fixed)
 base_link (机器人基座)
-  │
-  ├─ link1 ─ link2 ─ ... ─ link6 (机械臂关节) [动态TF]
-  │
-  └─ end_effector (末端执行器)
-        │
-        └─ camera_link (相机安装位置) [静态TF，手眼标定自动发布]
-              │
-              └─ camera_depth_optical_frame (深度相机光学坐标系) [静态TF，realsense2_camera发布]
+  ↓ (joint1-joint6, revolute) [动态TF，由 robot_state_publisher 发布]
+link1_1_1 ─ link2_1_1 ─ link3_1_1 ─ link4_1_1 ─ link5_1_1 ─ link6_1_1
+  ↓ (手眼变换) [动态TF，由 hand_eye_calibration 节点以10Hz周期发布]
+camera_link (相机安装位置，与 URDF 中的末端执行器 link6_1_1 关联)
+  ↓
+camera_color_optical_frame (深度相机光学坐标系，由 realsense2_camera 发布)
+camera_depth_optical_frame (深度相机光学坐标系，由 realsense2_camera 发布)
 ```
+
+### TF 发布方式说明
+
+| TF 变换                       | 发布者                     | 方式                     |
+| ----------------------------- | -------------------------- | ------------------------ |
+| world → base_link             | static_transform_publisher | 静态 (固定)              |
+| base_link → link6_1_1         | robot_state_publisher      | 动态 (基于 joint_states) |
+| link6_1_1 → camera_link       | hand_eye_calibration       | 动态 (10Hz周期发布)      |
+| camera_link → *_optical_frame | realsense2_camera          | 静态/动态 (相机内部变换) |
 
 ## 数据流
 
@@ -225,7 +163,7 @@ dummy_arm_controller (100Hz)
 | 故障现象    | 可能原因   | 解决方案              |
 | ----------- | ---------- | --------------------- |
 | 检测失败    | 模型未加载 | 检查模型文件路径和GPU |
-| GPU内存不足 | 点云过多   | 增加点云滤波          |
+| GPU内存不足 | 点云过多   | 增强点云滤波          |
 
 ### 手眼标定模块
 
@@ -244,5 +182,5 @@ dummy_arm_controller (100Hz)
 
 ---
 
-**文档版本**: 2.0
-**最后更新**: 2026-03-13
+**文档版本**: 3.0
+**最后更新**: 2026-03-17

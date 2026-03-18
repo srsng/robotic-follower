@@ -223,8 +223,18 @@ ros2_ws/
 | 机械臂执行 | 控制频率   | 100 Hz    |
 | 系统整体   | 端到端延迟 | < 200 ms  |
 
+
+## 脚本工具
+
+项目提供以下实用脚本：
+
+| 脚本                | 功能                      | 用法                                  |
+| ------------------- | ------------------------- | ------------------------------------- |
+| `health_check.py`   | 系统健康检查（话题/服务） | `python3 scripts/health_check.py`     |
+| `run_perception.sh` | 感知模块快速启动          | `./scripts/run_perception.sh votenet` |
+
 ## 常见问题
 
-- 查看 README.md 获取项目快速开始指南
+- 查看 QUICKSTART.md 获取快速开始指南
 - 查看 CLAUDE.md 获取详细的开发和工作指南
-- 查看 doc/modules/  下的文档获取模块设计细节
+- 查看 doc/modules/ 下的文档获取模块设计细节
