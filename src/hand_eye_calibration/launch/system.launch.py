@@ -3,7 +3,7 @@
 ROS2 机械臂视觉跟随系统 - 完整系统启动文件
 用途：一键启动所有必需的节点
 """
-
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -90,7 +90,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'enable_visualization': enable_visualization,
-            'save_dir': './data/saved_images',
+            'save_dir': os.path.expanduser('~/row2_ws/data/saved_images'),
             'rgb_topic': '/camera/color/image_raw',
             'depth_topic': '/camera/aligned_depth_to_color/image_raw',
         }]

@@ -1,5 +1,6 @@
 """相机图像可视化启动文件。"""
 
+import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.substitutions import LaunchConfiguration
@@ -18,7 +19,7 @@ def generate_launch_description():
 
     save_dir_arg = DeclareLaunchArgument(
         'save_dir',
-        default_value='./data/saved_images',
+        default_value=os.path.expanduser('~/ros2_ws/data/saved_images'),
         description='图像保存目录'
     )
 
