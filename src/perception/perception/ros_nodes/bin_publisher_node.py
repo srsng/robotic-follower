@@ -1,29 +1,19 @@
 #!/usr/bin/env python3
-"""从 .bin 文件读取点云进行测试的节点。纯发布者，不再直接可视化。"""
+"""从 .bin 文件读取点云进行测试并直接可视化的节点。"""
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image, CameraInfo, PointCloud2
-from vision_msgs.msg import Detection3DArray, Detection3D, ObjectHypothesisWithPose
-from geometry_msgs.msg import Point, Vector3, Quaternion, TransformStamped
-from cv_bridge import CvBridge
 import numpy as np
 import os
 import sys
 import pickle
-import math
-import cv2
-import yaml
-import warnings
 
 # 导入内部模块
 from perception.detection.inference.detector import create_detector_from_config
-from perception.point_cloud.io.ros_converters import numpy_to_pointcloud2
-from tf2_ros import TransformBroadcaster
-from ament_index_python.packages import get_package_share_directory
+from perception.visualization.visualizer import visualize_detections
 
 class BinPublisherNode(Node):
-    """读取 .bin 点云文件并发布相关数据的节点。"""
+    """读取 .bin 点云文件并直接进行Open3D可视化的节点。"""
 
     def __init__(self):
         super().__init__('bin_publisher_node')
@@ -34,254 +24,172 @@ class BinPublisherNode(Node):
         self.bin_file = self.get_parameter('bin_file').value
         self.run_detection = self.get_parameter('run_detection').value
 
-        # 创建发布者
-        self.pointcloud_pub = self.create_publisher(PointCloud2, '/perception/processed_pointcloud', 10)
-        self.image_pub = self.create_publisher(Image, '/camera/color/image_raw', 10)
-        self.camera_info_pub = self.create_publisher(CameraInfo, '/camera/color/camera_info', 10)
-        self.detections_pub = self.create_publisher(Detection3DArray, '/perception/detections', 10)
+        # 启动主循环，支持基于 GUI 事件的文件切换
+        self._run_visualization_loop()
 
-        # TF 广播器
-        self.tf_broadcaster = TransformBroadcaster(self)
+    def _run_visualization_loop(self):
+        """处理文件加载、检测和可视化的主循环，支持切换文件。"""
+        current_bin_file = self.bin_file
 
-        self.bridge = CvBridge()
-        self.detector = None
+        while current_bin_file:
+            if not os.path.exists(current_bin_file):
+                self.get_logger().error(f'无效的 bin 文件路径: {current_bin_file}')
+                break
 
-        if self.run_detection:
-            self._init_detector()
+            # 加载点云
+            self.points = self._load_bin_file(current_bin_file)
+            self.get_logger().info(f'成功加载点云，共 {len(self.points)} 个点 ({os.path.basename(current_bin_file)})')
 
-        # 状态
-        self.current_idx = None
-        self.dir_name = None
-        self.sunrgbd_root = None
+            if len(self.points) == 0:
+                break
 
-        if self.bin_file and os.path.exists(self.bin_file):
-            base_name = os.path.splitext(os.path.basename(self.bin_file))[0]
-            self.dir_name = os.path.dirname(self.bin_file)
+            # 初始化检测器并执行检测
+            self.detector = None
+            detections = []
+            if self.run_detection:
+                # 使用默认的 votenet 配置
+                import yaml
+                import warnings
+
+                # 过滤底层库已知的无害警告
+                warnings.filterwarnings("ignore", message="Unable to import Axes3D", category=UserWarning)
+                warnings.filterwarnings("ignore", message="Unnecessary conv bias before batch/instance norm", category=UserWarning)
+                warnings.filterwarnings("ignore", message="The torch.cuda.*DtypeTensor constructors are no longer recommended", category=UserWarning)
+
+                from ament_index_python.packages import get_package_share_directory
+                config_path = os.path.join(
+                    get_package_share_directory('perception'),
+                    'config', 'votenet_config.yaml'
+                )
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f)
+
+                    detector_config = config.get('detector', {})
+                    if detector_config:
+                        self.detector = create_detector_from_config(detector_config)
+                        self.get_logger().info('已初始化 3D 检测器，开始检测...')
+                        detections = self.detector.detect(self.points)
+                        self.get_logger().info(f'检测完成，发现 {len(detections)} 个目标')
+
+                        # 在终端整齐地输出检测结果
+                        for i, det in enumerate(detections):
+                            bbox = det['bbox']
+                            score = det['score']
+                            label = det['label']
+                            self.get_logger().info(
+                                f"  - 目标 {i+1}: 类别={label}, 置信度={score:.2f}, "
+                                f"位置=(x:{bbox[0]:.2f}, y:{bbox[1]:.2f}, z:{bbox[2]:.2f}), "
+                                f"尺寸=(w:{bbox[3]:.2f}, h:{bbox[4]:.2f}, d:{bbox[5]:.2f})"
+                            )
+                else:
+                    self.get_logger().error(f'未找到检测器配置文件: {config_path}')
+
+            # 自动推导对应的 image 和 calib 路径
+            rgb_image_path = None
+            calib_path = None
+
             try:
-                self.current_idx = int(base_name)
-                if 'sunrgbd' in self.bin_file:
-                    self.sunrgbd_root = self.bin_file[:self.bin_file.rfind('sunrgbd') + len('sunrgbd')]
-            except ValueError:
-                self.get_logger().error(f'无法解析文件名索引: {base_name}')
+                base_name = os.path.splitext(os.path.basename(current_bin_file))[0]
+                dir_name = os.path.dirname(current_bin_file)
+                # 假设 dir_name 是 .../points 或者是其他子目录，找到 sunrgbd 的根目录
+                if 'sunrgbd' in current_bin_file:
+                    # 寻找 data2/sunrgbd 或类似的公共前缀
+                    sunrgbd_root = current_bin_file[:current_bin_file.rfind('sunrgbd') + len('sunrgbd')]
+                    potential_img = os.path.join(sunrgbd_root, 'sunrgbd_trainval', 'image', f'{base_name}.jpg')
+                    potential_calib = os.path.join(sunrgbd_root, 'sunrgbd_trainval', 'calib', f'{base_name}.txt')
 
-        # 定时器 (1 Hz)
-        self.timer = self.create_timer(1.0, self.timer_callback)
+                    if os.path.exists(potential_img) and os.path.exists(potential_calib):
+                        rgb_image_path = potential_img
+                        calib_path = potential_calib
+                        self.get_logger().info(f'自动找到对应图像: {rgb_image_path}')
+                        self.get_logger().info(f'自动找到对应标定: {calib_path}')
 
-    def _init_detector(self):
-        # 过滤底层库已知的无害警告
-        warnings.filterwarnings("ignore", message="Unable to import Axes3D", category=UserWarning)
-        warnings.filterwarnings("ignore", message="Unnecessary conv bias before batch/instance norm", category=UserWarning)
-        warnings.filterwarnings("ignore", message="The torch.cuda.*DtypeTensor constructors are no longer recommended", category=UserWarning)
+                    # 尝试加载 pkl 中的 depth2img
+                    depth2img = None
+                    try:
+                        idx = int(base_name)
+                        # 确定是哪个 pkl
+                        pkl_name = 'sunrgbd_infos_val.pkl' if idx <= 5050 else 'sunrgbd_infos_train.pkl'
+                        pkl_path = os.path.join(sunrgbd_root, pkl_name)
+                        if os.path.exists(pkl_path):
+                            with open(pkl_path, 'rb') as f:
+                                infos = pickle.load(f)
+                                # 遍历查找对应的 lidar_path 包含 base_name
+                                for info in infos['data_list']:
+                                    lidar_path = info.get('lidar_points', {}).get('lidar_path', '')
+                                    if base_name in lidar_path:
+                                        depth2img = np.array(info['images']['CAM0']['depth2img'])
+                                        self.get_logger().info(f'自动从 {pkl_name} 中找到 depth2img 矩阵')
+                                        break
 
-        config_path = os.path.join(
-            get_package_share_directory('perception'),
-            'config', 'votenet_config.yaml'
-        )
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
+                                if depth2img is None and isinstance(infos, list):
+                                    for info in infos:
+                                        lidar_path = info.get('lidar_points', {}).get('lidar_path', '')
+                                        if base_name in lidar_path:
+                                            depth2img = np.array(info['images']['CAM0']['depth2img'])
+                                            self.get_logger().info(f'自动从 {pkl_name} 中找到 depth2img 矩阵')
+                                            break
+                    except Exception as pkl_e:
+                        self.get_logger().warn(f'尝试读取 pkl 获取 depth2img 失败: {pkl_e}')
 
-            detector_config = config.get('detector', {})
-            if detector_config:
-                self.detector = create_detector_from_config(detector_config)
-                self.get_logger().info('已初始化 3D 检测器')
-        else:
-            self.get_logger().error(f'未找到检测器配置文件: {config_path}')
-
-    def timer_callback(self):
-        if self.current_idx is None or self.dir_name is None:
-            return
-
-        current_base_name = f"{self.current_idx:06d}"
-        current_bin_file = os.path.join(self.dir_name, f"{current_base_name}.bin")
-
-        if not os.path.exists(current_bin_file):
-            self.get_logger().info(f'文件不存在，结束循环: {current_bin_file}')
-            self.timer.cancel()
-            return
-
-        self.get_logger().info(f'处理文件: {current_bin_file}')
-
-        # 1. 加载并转换点云
-        points = self._load_bin_file(current_bin_file)
-        if len(points) == 0:
-            self.current_idx += 1
-            return
-
-        # 坐标转换：x_cam=x, y_cam=-z, z_cam=y
-        pts_c = np.zeros_like(points)
-        pts_c[:, 0] = points[:, 0]
-        pts_c[:, 1] = -points[:, 2]
-        pts_c[:, 2] = points[:, 1]
-
-        # 2. 执行检测
-        detections = []
-        if self.detector is not None:
-             detections = self.detector.detect(points)
-             # 检测结果也在原来的深度坐标系，需要转到相机坐标系吗？
-             # perception_node里目前也是直接发出去的，暂时保持不变，或者按照需求转。
-             # 根据任务说明，发布时采用 camera_depth_optical_frame
-
-        # 3. 寻找对应的图像和标定文件
-        rgb_image = None
-        calib_path = None
-        depth2img = None
-
-        if self.sunrgbd_root:
-            potential_img = os.path.join(self.sunrgbd_root, 'sunrgbd_trainval', 'image', f'{current_base_name}.jpg')
-            potential_calib = os.path.join(self.sunrgbd_root, 'sunrgbd_trainval', 'calib', f'{current_base_name}.txt')
-
-            if os.path.exists(potential_img):
-                rgb_image = cv2.imread(potential_img)
-
-            if os.path.exists(potential_calib):
-                calib_path = potential_calib
-
-            # 尝试加载 pkl 中的 depth2img
-            try:
-                pkl_name = 'sunrgbd_infos_val.pkl' if self.current_idx <= 5050 else 'sunrgbd_infos_train.pkl'
-                pkl_path = os.path.join(self.sunrgbd_root, pkl_name)
-                if os.path.exists(pkl_path):
-                    with open(pkl_path, 'rb') as f:
-                        infos = pickle.load(f)
-                        data_list = infos.get('data_list', infos) if isinstance(infos, dict) else infos
-                        for info in data_list:
-                            lidar_path = info.get('lidar_points', {}).get('lidar_path', '')
-                            if current_base_name in lidar_path:
-                                depth2img = np.array(info['images']['CAM0']['depth2img'])
-                                break
             except Exception as e:
-                pass
+                self.get_logger().warn(f'推导图像和标定路径失败: {e}')
 
-        # 4. 发布数据
-        stamp = self.get_clock().now().to_msg()
+            # 阻塞式可视化，获取导航动作
+            self.get_logger().info('打开可视化窗口... (按 ← 或 → 切换文件，按 ESC 或 Q 退出)')
+            nav_action = visualize_detections(
+                self.points,
+                detections,
+                window_name=f"Perception Test - {os.path.basename(current_bin_file)}",
+                rgb_image_path=rgb_image_path,
+                calib_path=calib_path,
+                depth2img=depth2img
+            )
 
-        # 发布点云
-        # 这里的 points 应该发原点云还是转换后的？
-        # 参考要求："执行坐标转换：x_cam=x, y_cam=-z, z_cam=y（已在现有 _map_image_to_pointcloud 中实现）"
-        # 既然在 bin_publisher_node 发布了转换后的坐标，frame_id 需要保持一致。
-        # 假设这里我们发布 pts_c，并声称它是 camera_depth_optical_frame 或者直接对应 camera_color_optical_frame?
-        # 但是任务说：PointCloud2 的 frame 是 camera_depth_optical_frame，Image 的是 camera_color_optical_frame
-        # 原代码：pts_c[:, 0] = points[:, 0]; pts_c[:, 1] = -points[:, 2]; pts_c[:, 2] = points[:, 1]
-        pc_msg = numpy_to_pointcloud2(points, frame_id='camera_depth_optical_frame', stamp=stamp)
-        self.pointcloud_pub.publish(pc_msg)
+            # 根据返回的动作切换文件
+            if nav_action == 0:
+                self.get_logger().info('收到退出指令，可视化结束。')
+                break
+            elif nav_action == -1 or nav_action == 1:
+                try:
+                    current_idx = int(base_name)
+                    next_idx = current_idx + nav_action
+                    next_base_name = f"{next_idx:06d}"
+                    next_bin_file = os.path.join(dir_name, f"{next_base_name}.bin")
+                    if os.path.exists(next_bin_file):
+                        current_bin_file = next_bin_file
+                        self.get_logger().info(f'即将加载 {"下一个" if nav_action == 1 else "上一个"} 文件: {next_base_name}.bin')
+                    else:
+                        self.get_logger().warn(f'{"下一个" if nav_action == 1 else "上一个"} 文件不存在: {next_bin_file}')
+                        # 保持当前文件不变，但我们已经退出了窗口，所以为了体验，我们还是退出或者提示
+                        # 或者继续 break
+                        self.get_logger().info('已到达文件列表边界，退出。')
+                        break
+                except ValueError:
+                    self.get_logger().error(f'无法解析文件名索引: {base_name}，退出。')
+                    break
 
-        # 发布图像
-        if rgb_image is not None:
-            img_msg = self.bridge.cv2_to_imgmsg(rgb_image, encoding="bgr8")
-            img_msg.header.stamp = stamp
-            img_msg.header.frame_id = 'camera_color_optical_frame'
-            self.image_pub.publish(img_msg)
-
-        # 发布 CameraInfo & TF 广播
-        # 从 calib 或者 depth2img 中提取
-        K = np.eye(3)
-        Rt = np.eye(4)
-
-        if calib_path:
-            with open(calib_path, 'r') as f:
-                lines = f.readlines()
-            if len(lines) >= 2:
-                Rt_vals = [float(x) for x in lines[0].split()]
-                K_vals = [float(x) for x in lines[1].split()]
-                if len(Rt_vals) == 9 and len(K_vals) == 9:
-                    Rt[:3, :3] = np.array(Rt_vals).reshape(3, 3)
-                    K = np.array(K_vals).reshape(3, 3)
-
-        info_msg = CameraInfo()
-        info_msg.header.stamp = stamp
-        info_msg.header.frame_id = 'camera_color_optical_frame'
-        if rgb_image is not None:
-            info_msg.height = rgb_image.shape[0]
-            info_msg.width = rgb_image.shape[1]
-        info_msg.k = K.flatten().tolist()
-        self.camera_info_pub.publish(info_msg)
-
-        # 广播 TF
-        t = TransformStamped()
-        t.header.stamp = stamp
-        t.header.frame_id = 'camera_depth_optical_frame'
-        t.child_frame_id = 'camera_color_optical_frame'
-
-        # Rt 是 3x3 的旋转矩阵 (如果从 calib 读的话)
-        # 将旋转矩阵转换为四元数
-        m = Rt[:3, :3]
-        tr = m[0, 0] + m[1, 1] + m[2, 2]
-        if tr > 0:
-            S = math.sqrt(tr + 1.0) * 2
-            qw = 0.25 * S
-            qx = (m[2, 1] - m[1, 2]) / S
-            qy = (m[0, 2] - m[2, 0]) / S
-            qz = (m[1, 0] - m[0, 1]) / S
-        elif (m[0, 0] > m[1, 1]) and (m[0, 0] > m[2, 2]):
-            S = math.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]) * 2
-            qw = (m[2, 1] - m[1, 2]) / S
-            qx = 0.25 * S
-            qy = (m[0, 1] + m[1, 0]) / S
-            qz = (m[0, 2] + m[2, 0]) / S
-        elif m[1, 1] > m[2, 2]:
-            S = math.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]) * 2
-            qw = (m[0, 2] - m[2, 0]) / S
-            qx = (m[0, 1] + m[1, 0]) / S
-            qy = 0.25 * S
-            qz = (m[1, 2] + m[2, 1]) / S
-        else:
-            S = math.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2
-            qw = (m[1, 0] - m[0, 1]) / S
-            qx = (m[0, 2] + m[2, 0]) / S
-            qy = (m[1, 2] + m[2, 1]) / S
-            qz = 0.25 * S
-
-        t.transform.rotation.w = qw
-        t.transform.rotation.x = qx
-        t.transform.rotation.y = qy
-        t.transform.rotation.z = qz
-        t.transform.translation.x = 0.0
-        t.transform.translation.y = 0.0
-        t.transform.translation.z = 0.0
-
-        self.tf_broadcaster.sendTransform(t)
-
-        # 发布检测结果
-        det_msg = self._create_detection_msg(detections, stamp, 'camera_depth_optical_frame')
-        self.detections_pub.publish(det_msg)
-
-        # 准备下一个文件
-        self.current_idx += 1
-
-    def _create_detection_msg(self, detections, stamp, frame_id):
-        msg = Detection3DArray()
-        msg.header.stamp = stamp
-        msg.header.frame_id = frame_id
-        for det in detections:
-            detection = Detection3D()
-            bbox = det['bbox']  # [x, y, z, dx, dy, dz, yaw]
-            detection.bbox.center.position = Point(x=bbox[0], y=bbox[1], z=bbox[2])
-            detection.bbox.size = Vector3(x=bbox[3], y=bbox[4], z=bbox[5])
-            detection.bbox.center.orientation = self._yaw_to_quaternion(bbox[6])
-            hypothesis = ObjectHypothesisWithPose()
-            hypothesis.hypothesis.class_id = str(det['label'])
-            hypothesis.hypothesis.score = det['score']
-            detection.results.append(hypothesis)
-            msg.detections.append(detection)
-        return msg
-
-    @staticmethod
-    def _yaw_to_quaternion(yaw: float) -> Quaternion:
-        qz = math.sin(yaw / 2.0)
-        qw = math.cos(yaw / 2.0)
-        return Quaternion(x=0.0, y=0.0, z=qz, w=qw)
+        # 优雅退出
+        self.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+        sys.exit(0)
 
     def _load_bin_file(self, file_path: str) -> np.ndarray:
+        """加载 SUNRGBD 格式的 .bin 点云文件"""
         try:
+            # SUNRGBD 点云通常是 Nx6 (x,y,z,r,g,b) 或 Nx3
             points = np.fromfile(file_path, dtype=np.float32)
+            # 尝试推断维度
             if len(points) % 6 == 0:
                 points = points.reshape(-1, 6)
+                # 提取前3列作为坐标
                 return points[:, :3]
             elif len(points) % 3 == 0:
                 points = points.reshape(-1, 3)
                 return points
-            elif len(points) % 4 == 0:
+            elif len(points) % 4 == 0: # 比如 KITTI 格式
                 points = points.reshape(-1, 4)
                 return points[:, :3]
             else:
@@ -293,13 +201,16 @@ class BinPublisherNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = BinPublisherNode()
+    # 因为 BinPublisherNode 会在 __init__ 中阻塞并在完成时调用 sys.exit(0)
+    # 所以通常不会执行到 rclpy.spin
     try:
+        node = BinPublisherNode()
         rclpy.spin(node)
+    except SystemExit:
+        pass
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 
