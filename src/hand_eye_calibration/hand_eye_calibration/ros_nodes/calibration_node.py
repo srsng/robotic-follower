@@ -460,9 +460,14 @@ def main(args=None):
     """主函数。"""
     rclpy.init(args=args)
     node = CalibrationNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("收到中断信号，退出")
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

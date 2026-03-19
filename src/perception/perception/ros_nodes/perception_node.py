@@ -234,7 +234,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info("收到中断信号，退出")
     finally:
         node.destroy_node()
         rclpy.shutdown()

@@ -13,7 +13,11 @@ def generate_launch_description():
 
     # 声明启动参数
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
-    config_file = LaunchConfiguration('config_file', default='')
+    config_file = LaunchConfiguration('config_file', default=PathJoinSubstitution([
+        FindPackageShare('perception'),
+        'config',
+        'votenet_config.yaml'
+    ]))
     enable_visualization = LaunchConfiguration('enable_visualization', default='true')
 
     # 感知节点
@@ -49,4 +53,10 @@ def generate_launch_description():
 
         # 启动节点
         perception_node,
+        Node(
+            package='perception',
+            executable='rviz_marker_node',
+            name='rviz_marker',
+            output='screen'
+        ),
     ])

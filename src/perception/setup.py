@@ -29,6 +29,9 @@ setup(
     entry_points={
         'console_scripts': [
             'perception_node = perception.ros_nodes.perception_node:main',
+            'rviz_marker_node = perception.ros_nodes.rviz_marker_node:main',
+            'bin_publisher_node = perception.ros_nodes.bin_publisher_node:main',
+            'open3d_visualizer_node = perception.ros_nodes.open3d_visualizer_node:main',
         ],
     },
 )

@@ -58,8 +58,8 @@ class Detector3D:
                 device=self.device
             )
             print(f"✓ 成功加载 3D 检测模型: {self.checkpoint_file}")
-        except ImportError:
-            print("警告：MMDetection3D 未安装，使用模拟检测器")
+        except ImportError as e:
+            print(f"警告：MMDetection3D 导入失败: {e}，使用模拟检测器")
             self.model = None
         except Exception as e:
             print(f"警告：模型加载失败: {e}")
@@ -109,6 +109,13 @@ class Detector3D:
 
             result = inference_detector(self.model, points_with_density)
 
+            # mmdet3d 1.x 中 inference_detector 的返回值通常是一个包含结果和数据的元组 (result, data)
+            # 或者如果是批处理推理，返回的可能是列表。这里进行兼容处理。
+            if isinstance(result, tuple):
+                result = result[0]
+            if isinstance(result, list):
+                result = result[0]
+
             # 解析结果
             detections = self._parse_mmdet3d_result(result)
 
@@ -128,10 +135,17 @@ class Detector3D:
         """解析 MMDetection3D 检测结果。"""
         detections = []
 
-        # 提取边界框、分数和标签
-        bboxes = result['boxes_3d'].tensor.cpu().numpy()
-        scores = result['scores_3d'].cpu().numpy()
-        labels = result['labels_3d'].cpu().numpy()
+        # 提取边界框、分数和标签 (针对 MMDetection3D 1.x 中 Det3DDataSample 结构)
+        if hasattr(result, 'pred_instances_3d'):
+            pred = result.pred_instances_3d
+            bboxes = pred.bboxes_3d.tensor.cpu().numpy()
+            scores = pred.scores_3d.cpu().numpy()
+            labels = pred.labels_3d.cpu().numpy()
+        else:
+            # 兼容老版本格式
+            bboxes = result['boxes_3d'].tensor.cpu().numpy()
+            scores = result['scores_3d'].cpu().numpy()
+            labels = result['labels_3d'].cpu().numpy()
 
         for bbox, score, label in zip(bboxes, scores, labels):
             detections.append({
