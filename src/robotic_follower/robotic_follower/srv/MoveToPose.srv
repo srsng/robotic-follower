@@ -1,0 +1,15 @@
+# MoveToPose.srv - 移动到位姿服务
+#
+# 控制机械臂末端执行器移动到目标位姿（笛卡尔空间）
+#
+# 请求字段：
+#   target_pose - 目标位姿（包含位置和姿态）
+#
+# 响应字段：
+#   success - 操作是否成功
+#   message - 状态信息或错误消息
+
+geometry_msgs/PoseStamped target_pose
+---
+bool success
+string message

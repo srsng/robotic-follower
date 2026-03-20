@@ -29,12 +29,16 @@ Visualization Manager:
       Name: ColorImage
       Topic: /camera/color/image_raw
 
+    - Class: rviz_default_plugins/Image
+      Name: DepthImage
+      Topic: /perception/depth_colored
+
     - Class: rviz_default_plugins/MarkerArray
       Name: Detections
       Topic: /perception/detection_markers
 
   Global Options:
-    Fixed Frame: base_link
+    Fixed Frame: camera_depth_optical_frame
 
   Views:
     Current:

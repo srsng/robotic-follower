@@ -1,0 +1,62 @@
+# Robotic_follower Ruff 配置
+# Ruff: 极速 Python Linter (https://docs.astral.sh/ruff)
+
+# === 基础配置 ===
+target-version = "py310"
+line-length = 88
+
+[lint]
+# 启用规则组
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez
+    "ISC",    # flake8-implicit-str-concat
+    "PIE",    # flake8-pie
+    "RET",    # flake8-return
+    "SIM",    # flake8-simplify
+    "RUF",    # Ruff 特定规则
+]
+
+# 忽略的规则
+ignore = [
+    "E501",       # 行长度（由 formatter 处理）
+    "B008",       # 函数默认参数（ROS2 常用模式）
+    "RUF001",     # 中文文档字符串全角标点
+    "RUF002",     # 中文文档字符串全角标点
+    "RUF003",     # 中文注释中的 Unicode 字符
+    "RUF059",     # 未使用的解包变量（ArUco 检测返回值）
+]
+
+[lint.per-file-ignores]
+# ROS2 节点文件
+"*/ros_nodes/*.py" = [
+    "PLR0912",    # 分支过多
+    "N806",       # 大写变量名（回调参数）
+]
+# 测试文件
+"test/*.py" = [
+    "S101",       # assert 语句
+    "N806",       # 大写常量
+]
+# 包初始化文件
+"*/__init__.py" = [
+    "N999",       # ROS2 包名使用连字符
+]
+
+[lint.isort]
+# ROS2 导入顺序
+known-first-party = ["robotic_follower"]
+lines-after-imports = 2
+
+[format]
+# Black 兼容格式化
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

@@ -4,6 +4,7 @@ log
 data
 
 __pycache__
+.ruff_cache/
 
 # BMad Method V6
 _bmad/

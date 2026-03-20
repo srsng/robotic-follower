@@ -1,0 +1,15 @@
+# MoveJoints.srv - 关节移动服务
+#
+# 直接控制机械臂关节位置
+#
+# 请求字段：
+#   joint_positions - 目标关节位置数组（弧度）
+#
+# 响应字段：
+#   success - 操作是否成功
+#   message - 状态信息或错误消息
+
+float64[] joint_positions
+---
+bool success
+string message

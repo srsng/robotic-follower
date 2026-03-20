@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robotic_follower</name>
+  <version>0.0.1</version>
+  <description>机械臂视觉跟随系统 - 统一感知、标定、规划控制模块</description>
+  <maintainer email="srsnng@hotmail.com">srsnn</maintainer>
+  <license>MIT</license>
+
+  <!-- ROS2 核心依赖 -->
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>vision_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>cv_bridge</depend>
+
+  <!-- 服务接口 -->
+  <depend>std_srvs</depend>
+
+  <!-- 相机驱动 -->
+  <depend>realsense2_camera</depend>
+
+  <!-- 机械臂 -->
+  <depend>ros2_dummy_arm_810</depend>
+  <depend>moveit_ros_planning_interface</depend>
+
+  <!-- ArUco 标定板 -->
+  <depend>ros2_aruco</depend>
+  <depend>ros2_aruco_interfaces</depend>
+
+  <!-- 服务定义生成 -->
+  <build_depend>rosidl_default_generators</build_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <!-- 测试依赖 -->
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

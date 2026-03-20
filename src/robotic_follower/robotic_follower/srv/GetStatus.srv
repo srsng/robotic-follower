@@ -1,0 +1,15 @@
+# GetStatus.srv - 获取状态服务
+#
+# 用于查询各种模块的状态信息
+#
+# 响应字段：
+#   sample_count - 样本数量（标定用）
+#   state - 当前状态字符串
+#   last_error - 最后错误值
+#   has_result - 是否有有效结果
+
+---
+int32 sample_count
+string state
+float64 last_error
+bool has_result

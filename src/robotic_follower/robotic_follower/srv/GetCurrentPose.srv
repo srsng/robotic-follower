@@ -1,0 +1,13 @@
+# GetCurrentPose.srv - 获取当前位姿服务
+#
+# 获取机械臂末端执行器当前位姿
+#
+# 响应字段：
+#   current_pose - 当前末端位姿
+#   success - 是否成功获取
+#   message - 状态信息或错误消息
+
+---
+geometry_msgs/PoseStamped current_pose
+bool success
+string message

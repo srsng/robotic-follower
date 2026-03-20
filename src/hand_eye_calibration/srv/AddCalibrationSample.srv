@@ -1,7 +1,0 @@
-bool success
-uint32 sample_count
----
-bool success
-uint32 sample_count
-uint32 min_samples
-uint32 max_samples
