@@ -27,6 +27,7 @@
 """
 
 import os
+import warnings
 
 import rclpy
 from geometry_msgs.msg import Point, Quaternion, Vector3
@@ -41,10 +42,25 @@ from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
 class DetectionNode(Node):
     """3D 目标检测节点。"""
 
-    DEFAULT_CONFIG = "model/config/votenet_config.yaml"
+    DEFAULT_CONFIG = "~/ros2_ws/install/robotic_follower/share/robotic_follower/model/config/votenet_config.yaml"
 
     def __init__(self):
         super().__init__("detection_node")
+
+        # 过滤底层库已知的无害警告
+        warnings.filterwarnings(
+            "ignore", message="Unable to import Axes3D", category=UserWarning
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="Unnecessary conv bias before batch/instance norm",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="The torch.cuda.*DtypeTensor constructors are no longer recommended",
+            category=UserWarning,
+        )
 
         # 获取包路径
         from ament_index_python.packages import get_package_share_directory
@@ -61,8 +77,8 @@ class DetectionNode(Node):
         # 参数
         self.declare_parameter("config_file", self.DEFAULT_CONFIG)
 
-        config_file = self.get_parameter("config_file").value
-        config_file = self._resolve_path(config_file)
+        config_file = os.path.expanduser(self.get_parameter("config_file").value)
+        # config_file = self._resolve_path(config_file)
 
         # 加载配置
         self.detector = None
@@ -116,25 +132,15 @@ class DetectionNode(Node):
             self.get_logger().error("配置文件中无 detector 配置")
             return
 
-        # 解析相对路径（相对于包根目录）
-        # config_file = .../robotic_follower/model/config/votenet_config.yaml
-        # package_root = .../robotic_follower
-        config_dir = os.path.dirname(config_file)  # .../robotic_follower/model/config
-        package_root = os.path.dirname(
-            os.path.dirname(config_dir)
-        )  # .../robotic_follower
-
-        def resolve(path: str) -> str:
-            if not path:
-                return ""
-            if os.path.isabs(path):
-                return path
-            return os.path.join(package_root, path)
-
-        detector_config["config_file"] = resolve(detector_config.get("config_file", ""))
-        detector_config["checkpoint_file"] = resolve(
-            detector_config.get("checkpoint_file", "")
+        detector_config["config_file"] = os.path.expanduser(
+            detector_config["config_file"]
         )
+        detector_config["checkpoint_file"] = os.path.expanduser(
+            detector_config["checkpoint_file"]
+        )
+
+        self.get_logger().info(f"config_file: {detector_config['config_file']}")
+        self.get_logger().info(f"checkpoint_file: {detector_config['checkpoint_file']}")
 
         self.detector = create_detector_from_config(detector_config)
         if self.detector and self.detector.model is not None:
@@ -144,7 +150,9 @@ class DetectionNode(Node):
 
     def pointcloud_callback(self, msg: PointCloud2):
         """点云回调。"""
+        self.get_logger().info(f"收到点云消息: {msg.width * msg.height} 点")
         if self.detector is None or self.detector.model is None:
+            self.get_logger().warn("检测器未就绪")
             return
 
         try:
@@ -156,10 +164,11 @@ class DetectionNode(Node):
                 return
 
             detections = self.detector.detect(points)
+            self.get_logger().info(f"检测到 {len(detections)} 个目标")
             if detections:
                 detection_msg = self._create_detection_msg(detections, msg.header)
                 self.detections_pub.publish(detection_msg)
-                self.get_logger().info(f"检测到 {len(detections)} 个目标")
+                self.get_logger().info("已发布检测结果")
 
         except Exception as e:
             self.get_logger().error(f"检测失败: {e}")
