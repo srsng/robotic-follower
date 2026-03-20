@@ -67,11 +67,11 @@
 
 ### 服务接口
 
-| 服务名称                           | 请求类型               | 响应类型            | 说明         |
-| ---------------------------------- | ---------------------- | ------------------- | ------------ |
-| `/hand_eye_calibration/add_sample` | `AddCalibrationSample` | `CalibrationStatus` | 添加标定样本 |
-| `/hand_eye_calibration/execute`    | `ExecuteCalibration`   | `CalibrationResult` | 执行标定     |
-| `/hand_eye_calibration/reset`      | `ResetCalibration`     | `CalibrationStatus` | 重置标定     |
+| 服务名称                           | 请求类型           | 响应类型      | 说明         |
+| ---------------------------------- | ------------------ | ------------- | ------------ |
+| `/hand_eye_calibration/add_sample` | `std_srvs/Trigger` | `std_srvs/Trigger` | 添加标定样本 |
+| `/hand_eye_calibration/execute`    | `std_srvs/Trigger` | `std_srvs/Trigger` | 执行标定     |
+| `/hand_eye_calibration/reset`      | `std_srvs/Trigger` | `std_srvs/Trigger` | 重置标定     |
 
 ## TF 树结构
 

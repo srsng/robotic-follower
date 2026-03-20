@@ -39,7 +39,8 @@ from launch import LaunchDescription
 def get_visualizer_node(context, visualizer_type):
     """根据 visualizer_type 返回对应的可视化节点列表。"""
     viz_type = context.perform_substitution(visualizer_type)
-
+    assert viz_type in ("open3d", "rivz")
+    
     if viz_type == "open3d":
         return [
             Node(
@@ -68,7 +69,7 @@ def generate_launch_description():
     sunrgbd_idx = LaunchConfiguration("sunrgbd_idx", default=-1)
     run_detection = LaunchConfiguration("run_detection", default="true")
     publish_rate = LaunchConfiguration("publish_rate", default="1.0")
-    visualizer_type = LaunchConfiguration("visualizer_type", default="open3d")
+    visualizer_type = LaunchConfiguration("gui", default="open3d")
 
     # 1. 模拟相机节点
     camera_sim_node = Node(
@@ -131,7 +132,7 @@ def generate_launch_description():
                 description="Topic publishing rate (Hz)",
             ),
             DeclareLaunchArgument(
-                "gui_type",
+                "gui",
                 default_value="open3d",
                 description='GUI type of Visualizer: "open3d" (default) or "rviz"',
             ),

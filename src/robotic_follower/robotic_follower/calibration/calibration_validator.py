@@ -36,7 +36,7 @@ class CalibrationValidator:
 
         # 计算各个样本的误差
         errors = []
-        for i, sample in enumerate(samples):
+        for _, sample in enumerate(samples):
             robot_pose = sample.robot_pose
             camera_pose = sample.camera_pose
 

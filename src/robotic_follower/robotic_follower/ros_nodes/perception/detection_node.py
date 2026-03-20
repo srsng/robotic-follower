@@ -116,15 +116,20 @@ class DetectionNode(Node):
             self.get_logger().error("配置文件中无 detector 配置")
             return
 
-        # 解析相对路径
-        config_dir = os.path.dirname(config_file)
+        # 解析相对路径（相对于包根目录）
+        # config_file = .../robotic_follower/model/config/votenet_config.yaml
+        # package_root = .../robotic_follower
+        config_dir = os.path.dirname(config_file)  # .../robotic_follower/model/config
+        package_root = os.path.dirname(
+            os.path.dirname(config_dir)
+        )  # .../robotic_follower
 
         def resolve(path: str) -> str:
             if not path:
                 return ""
             if os.path.isabs(path):
                 return path
-            return os.path.join(config_dir, "..", path)
+            return os.path.join(package_root, path)
 
         detector_config["config_file"] = resolve(detector_config.get("config_file", ""))
         detector_config["checkpoint_file"] = resolve(

@@ -45,6 +45,7 @@ from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectory
+from vision_msgs.msg import Detection3D, Detection3DArray
 
 
 class PlanningNode(Node):
@@ -73,7 +74,7 @@ class PlanningNode(Node):
 
         # 订阅
         self.detection_sub = self.create_subscription(
-            vision_msgs.msg.Detection3DArray,
+            Detection3DArray,
             "/perception/detections",
             self.detection_callback,
             10,
@@ -121,7 +122,7 @@ class PlanningNode(Node):
 
         self.get_logger().info("运动规划节点已启动")
 
-    def detection_callback(self, msg: vision_msgs.msg.Detection3DArray):
+    def detection_callback(self, msg: Detection3DArray):
         """处理检测结果。"""
         if not self.is_following or len(msg.detections) == 0:
             return
@@ -142,9 +143,7 @@ class PlanningNode(Node):
         self.current_robot_pose[1, 3] = msg.pose.position.y
         self.current_robot_pose[2, 3] = msg.pose.position.z
 
-    def _get_target_from_detection(
-        self, detection: vision_msgs.msg.Detection3D
-    ) -> np.ndarray | None:
+    def _get_target_from_detection(self, detection: Detection3D) -> np.ndarray | None:
         """从检测结果提取目标位置。
 
         Args:

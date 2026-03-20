@@ -33,7 +33,6 @@ import json
 
 import numpy as np
 import rclpy
-import std_srvs.srv
 from rclpy.node import Node
 from std_msgs.msg import String
 
@@ -82,13 +81,15 @@ class CalibrationCalculatorNode(Node):
         )
 
         # 服务
+        from robotic_follower.srv import ExecuteCalibration, ResetCalibration
+
         self.execute_srv = self.create_service(
-            std_srvs.srv.Trigger,
+            ExecuteCalibration,
             "/hand_eye_calibration/execute",
             self.execute_callback,
         )
         self.reset_srv = self.create_service(
-            std_srvs.srv.Trigger,
+            ResetCalibration,
             "/hand_eye_calibration/reset",
             self.reset_callback,
         )
@@ -109,12 +110,14 @@ class CalibrationCalculatorNode(Node):
 
     def execute_callback(
         self,
-        request: std_srvs.srv.Trigger.Request,
-        response: std_srvs.srv.Trigger.Response,
-    ) -> std_srvs.srv.Trigger.Response:
+        request: None,
+        response: "ExecuteCalibration.Response",
+    ) -> "ExecuteCalibration.Response":
         """执行标定计算。"""
+
         if len(self.samples) < self.min_samples:
             response.success = False
+            response.error = 0.0
             response.message = f"样本不足: {len(self.samples)}/{self.min_samples}"
             self.get_logger().warn(response.message)
             return response
@@ -130,6 +133,7 @@ class CalibrationCalculatorNode(Node):
 
             if len(robot_poses) != len(camera_poses):
                 response.success = False
+                response.error = 0.0
                 response.message = "机械臂位姿和相机位姿数量不一致"
                 return response
 
@@ -150,23 +154,34 @@ class CalibrationCalculatorNode(Node):
             )
             self.result_pub.publish(result_msg)
 
+            # 填充响应
             response.success = True
+            response.error = result["error"]
+            # rotation_matrix: 3x3 flatten to 9 elements
+            rm = result["rotation_matrix"].flatten()
+            response.rotation_matrix = rm.tolist()
+            response.translation_vector = (
+                result["translation_vector"].flatten().tolist()
+            )
+            response.quaternion = result["quaternion"]
             response.message = f"标定完成，误差: {result['error']:.6f}m"
             self.get_logger().info(response.message)
             return response
 
         except Exception as e:
             response.success = False
+            response.error = 0.0
             response.message = f"标定失败: {e}"
             self.get_logger().error(response.message)
             return response
 
     def reset_callback(
         self,
-        request: std_srvs.srv.Trigger.Request,
-        response: std_srvs.srv.Trigger.Response,
-    ) -> std_srvs.srv.Trigger.Response:
+        request: None,
+        response: "ResetCalibration.Response",
+    ) -> "ResetCalibration.Response":
         """重置标定数据。"""
+
         self.samples = []
         response.success = True
         response.message = "标定数据已重置"
