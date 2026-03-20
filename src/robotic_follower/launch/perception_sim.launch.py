@@ -3,9 +3,8 @@
 
 使用模拟相机数据进行感知测试：
 1. 模拟相机节点（从 .bin 文件发布数据）
-2. 点云处理器（可选，跳过，因为 camera_sim 已处理）
-3. 3D 检测器
-4. 可视化 (可选 Open3D 或 RViz)
+2. 3D 检测器
+3. 可视化 (可选 Open3D 或 RViz)
 
 使用场景：
     - 离线数据测试
@@ -17,21 +16,26 @@
     ros2 launch robotic_follower perception_sim.launch.py sunrgbd_idx:=0
 
     # 使用 .bin 文件 + RViz 可视化
-    ros2 launch robotic_follower perception_sim.launch.py bin_file:=/path/to/data.bin visualizer_type:=rviz
+    ros2 launch robotic_follower perception_sim.launch.py bin_file:=/path/to/data.bin gui:=rviz
 
     # 仅点云处理，不运行检测
     ros2 launch robotic_follower perception_sim.launch.py run_detection:=false
 
     # Open3D 可视化（带窗口）
-    ros2 launch robotic_follower perception_sim.launch.py visualizer_type:=open3d
+    ros2 launch robotic_follower perception_sim.launch.py gui:=open3d
 
-    # RViz 可视化
-    ros2 launch robotic_follower perception_sim.launch.py visualizer_type:=rviz
+    # RViz 可视化（需要 DISPLAY 环境变量）
+    ros2 launch robotic_follower perception_sim.launch.py gui:=rviz
+
+    # RViz 不显示机械臂模型
+    ros2 launch robotic_follower perception_sim.launch.py gui:=rviz use_robot_model:=false
 """
 
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.substitutions import FindPackageShare
 
 from launch import LaunchDescription
 
@@ -50,13 +54,17 @@ def get_visualizer_node(context, visualizer_type):
                 output="screen",
             )
         ]
-    # rviz
+
+    # rviz: 包含机械臂模型 + 感知数据转发 + RViz2 窗口
     return [
-        Node(
-            package="robotic_follower",
-            executable="rviz_visualizer",
-            name="rviz_visualizer",
-            output="screen",
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([
+                FindPackageShare("robotic_follower"), "/launch/rviz_perception.launch.py"
+            ]),
+            launch_arguments={
+                "use_robot_model": "true",
+                "rviz_config": "default",
+            }.items(),
         )
     ]
 
@@ -87,15 +95,7 @@ def generate_launch_description():
         ],
     )
 
-    # # 2. 点云处理器（可选，因为 camera_sim 已经处理）
-    # pointcloud_processor_node = Node(
-    #     package='robotic_follower',
-    #     executable='pointcloud_processor',
-    #     name='pointcloud_processor',
-    #     output='screen',
-    # )
-
-    # 3. 3D 检测器
+    # 2. 3D 检测器
     detection_node = Node(
         package="robotic_follower",
         executable="detection_node",
@@ -103,14 +103,13 @@ def generate_launch_description():
         output="screen",
     )
 
-    # 4. 可视化节点（根据 visualizer_type 参数选择）
+    # 3. 可视化节点
     visualizer_node = OpaqueFunction(
         function=get_visualizer_node, args=[visualizer_type]
     )
 
     return LaunchDescription(
         [
-            # 声明参数
             DeclareLaunchArgument(
                 "bin_file",
                 default_value="",
@@ -138,7 +137,6 @@ def generate_launch_description():
             ),
             # 启动节点
             camera_sim_node,
-            # pointcloud_processor_node,
             detection_node,
             visualizer_node,
         ]

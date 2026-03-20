@@ -5,15 +5,19 @@ from sensor_msgs.msg import PointCloud2, PointField
 
 
 def numpy_to_pointcloud2(
-    points: np.ndarray, frame_id: str = "camera_depth_optical_frame", stamp=None
+    points: np.ndarray,
+    frame_id: str = "camera_depth_optical_frame",
+    stamp=None,
+    pack_rgb: bool = False,
 ) -> PointCloud2:
     """
     将 NumPy 点云转换为 ROS2 PointCloud2 消息。
 
     Args:
-        points: 点云数组 (N, 3) 或 (N, 4)，列为 [x, y, z] 或 [x, y, z, intensity]
+        points: 点云数组 (N, 3) 或 (N, 4)，列为 [x, y, z] 或 [x, y, z, density/rgb]
         frame_id: 坐标系 ID
         stamp: 时间戳（可选）
+        pack_rgb: 是否将 RGB 打包为单个 float32 字段（兼容 RViz RGB8 颜色变换）
 
     Returns:
         PointCloud2 消息
@@ -32,6 +36,7 @@ def numpy_to_pointcloud2(
             PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
         ]
         point_step = 12
+        msg.data = points.astype(np.float32).tobytes()
     elif points.shape[1] == 4:
         # XYZ + Intensity/Density
         fields = [
@@ -43,21 +48,48 @@ def numpy_to_pointcloud2(
             ),
         ]
         point_step = 16
+        msg.data = points.astype(np.float32).tobytes()
     elif points.shape[1] == 6:
-        # XYZ + RGB (假设后三列是归一化到 [0, 1] 的 r, g, b)
-        # 注意: 我们可以将 RGB 打包成一个 FLOAT32 来兼容 PCL 或者分别传
-        # 为了与 python 配合，我们目前直接发送三个 float (不压缩)
-        # 但标准 ROS PCL 通常打包成一个 FLOAT32 (rgb 或 rgba)
-        # 简单起见，我们定义自定义字段 r, g, b
-        fields = [
-            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
-            PointField(name="r", offset=12, datatype=PointField.FLOAT32, count=1),
-            PointField(name="g", offset=16, datatype=PointField.FLOAT32, count=1),
-            PointField(name="b", offset=20, datatype=PointField.FLOAT32, count=1),
-        ]
-        point_step = 24
+        # XYZ + RGB
+        if pack_rgb:
+            # 打包为单个 rgb 字段（RViz RGB8 颜色变换需要）
+            # RGB 值从 [0, 1] 转为 [0, 255] 再打包为 uint32
+            rgb_vals = points[:, 3:6].copy()
+            if rgb_vals.max() <= 1.0:
+                rgb_vals = (rgb_vals * 255).astype(np.uint8)
+            else:
+                rgb_vals = rgb_vals.astype(np.uint8)
+            # RGB 打包为单个 float32（标准 ABGR 格式，RViz RGB8 颜色变换使用）
+            # 注意：IEEE 754 float32 的字节序与系统字节序相同
+            # ROS PointCloud2 惯例：rgb 字段为 0xRRGGBB（大端）
+            rgb_packed = (
+                (rgb_vals[:, 2].astype(np.uint32) << 16)
+                | (rgb_vals[:, 1].astype(np.uint32) << 8)
+                | rgb_vals[:, 0].astype(np.uint32)
+            )
+            rgb_packed = rgb_packed.view(np.float32)
+
+            xyz_rgb = np.column_stack([points[:, :3], rgb_packed])
+            fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(name="rgb", offset=12, datatype=PointField.FLOAT32, count=1),
+            ]
+            point_step = 16
+            msg.data = xyz_rgb.astype(np.float32).tobytes()
+        else:
+            # 原有行为：分开 r, g, b 字段
+            fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(name="r", offset=12, datatype=PointField.FLOAT32, count=1),
+                PointField(name="g", offset=16, datatype=PointField.FLOAT32, count=1),
+                PointField(name="b", offset=20, datatype=PointField.FLOAT32, count=1),
+            ]
+            point_step = 24
+            msg.data = points.astype(np.float32).tobytes()
     else:
         raise ValueError(f"不支持的点云维度: {points.shape[1]}")
 
@@ -68,9 +100,6 @@ def numpy_to_pointcloud2(
     msg.row_step = point_step * points.shape[0]
     msg.is_dense = True
     msg.is_bigendian = False
-
-    # 转换为字节数据（向量化，避免逐点拼接）
-    msg.data = points.astype(np.float32).tobytes()
 
     return msg
 

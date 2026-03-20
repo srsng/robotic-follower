@@ -25,6 +25,8 @@ setup(
         ),
         # Launch 文件
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
+        # RViz 配置文件
+        (os.path.join("share", package_name, "rviz"), glob("rviz/*.rviz")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,

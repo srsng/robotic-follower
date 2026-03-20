@@ -99,8 +99,82 @@ class RVizVisualizerNode(Node):
         self.get_logger().info("RViz 可视化节点已启动")
 
     def pointcloud_callback(self, msg: PointCloud2):
-        """点云直接转发（话题分流）。"""
-        self.pc_pub.publish(msg)
+        """点云回调：将 r,g,b 转换为 rgb 打包格式供 RViz 显示。"""
+        # 检查是否有分开的 r, g, b 字段
+        field_names = [f.name for f in msg.fields]
+        has_separate_rgb = "r" in field_names and "g" in field_names and "b" in field_names
+
+        if has_separate_rgb and msg.width > 0:
+            # 转换为 rgb 打包格式
+            converted_msg = self._convert_to_packed_rgb(msg)
+            self.pc_pub.publish(converted_msg)
+        else:
+            self.pc_pub.publish(msg)
+
+    @staticmethod
+    def _convert_to_packed_rgb(msg: PointCloud2) -> PointCloud2:
+        """将分开的 r,g,b 字段转换为打包的 rgb 字段。"""
+        import numpy as np
+        from sensor_msgs.msg import PointCloud2, PointField
+
+        # 解析字段偏移
+        field_offsets = {f.name: f.offset for f in msg.fields}
+
+        n_points = msg.width * msg.height
+
+        # 读取 x, y, z, r, g, b
+        data = np.frombuffer(msg.data, dtype=np.uint8).reshape(n_points, -1)
+
+        x = data[:, field_offsets["x"] : field_offsets["x"] + 4].view(np.float32)
+        y = data[:, field_offsets["y"] : field_offsets["y"] + 4].view(np.float32)
+        z = data[:, field_offsets["z"] : field_offsets["z"] + 4].view(np.float32)
+        r = data[:, field_offsets["r"] : field_offsets["r"] + 4].view(np.float32)
+        g = data[:, field_offsets["g"] : field_offsets["g"] + 4].view(np.float32)
+        b = data[:, field_offsets["b"] : field_offsets["b"] + 4].view(np.float32)
+
+        # 归一化到 [0, 1]
+        r_norm = np.clip(r, 0, 1)
+        g_norm = np.clip(g, 0, 1)
+        b_norm = np.clip(b, 0, 1)
+
+        # 如果是 [0, 255] 范围则归一化
+        if r_norm.max() > 1.0:
+            r_norm = r_norm / 255.0
+            g_norm = g_norm / 255.0
+            b_norm = b_norm / 255.0
+
+        # 转换为 uint8 再打包为 ABGR 格式（RViz RGB8 使用）
+        r_u8 = (r_norm * 255).astype(np.uint8)
+        g_u8 = (g_norm * 255).astype(np.uint8)
+        b_u8 = (b_norm * 255).astype(np.uint8)
+
+        rgb_packed = (
+            (r_u8.astype(np.uint32) << 16)
+            | (g_u8.astype(np.uint32) << 8)
+            | b_u8.astype(np.uint32)
+        ).view(np.float32)
+
+        # 构建新的点云数据 (x, y, z, rgb)
+        new_data = np.column_stack([x, y, z, rgb_packed]).astype(np.float32)
+
+        # 创建新的 PointCloud2 消息
+        new_msg = PointCloud2()
+        new_msg.header = msg.header
+        new_msg.height = 1
+        new_msg.width = n_points
+        new_msg.fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(name="rgb", offset=12, datatype=PointField.FLOAT32, count=1),
+        ]
+        new_msg.point_step = 16
+        new_msg.row_step = 16 * n_points
+        new_msg.data = new_data.tobytes()
+        new_msg.is_dense = True
+        new_msg.is_bigendian = False
+
+        return new_msg
 
     def rgb_callback(self, msg: Image):
         """彩色图直接转发。"""
