@@ -32,6 +32,10 @@ ignore = [
     "RUF002",     # 中文文档字符串全角标点
     "RUF003",     # 中文注释中的 Unicode 字符
     "RUF059",     # 未使用的解包变量（ArUco 检测返回值）
+    "N806",       # Variable `X` in function should be lowercase
+    "RET504",     # Unnecessary assignment before `return` statement
+    "N803",       # Argument name `X` should be lowercase
+    "RUF022",     # `__all__` is not sorted
 ]
 
 [lint.per-file-ignores]
@@ -48,6 +52,10 @@ ignore = [
 # 包初始化文件
 "*/__init__.py" = [
     "N999",       # ROS2 包名使用连字符
+]
+# models配置文件
+"**/model/**.py" = [
+    "C408",       # Unnecessary `dict()` call (rewrite as a literal)
 ]
 
 [lint.isort]
