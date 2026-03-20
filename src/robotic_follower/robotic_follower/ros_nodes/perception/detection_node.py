@@ -150,23 +150,26 @@ class DetectionNode(Node):
 
     def pointcloud_callback(self, msg: PointCloud2):
         """点云回调。"""
-        self.get_logger().info(f"收到点云消息: {msg.width * msg.height} 点")
+        self.get_logger().debug(f"收到点云消息: {msg.width * msg.height} 点")
         if self.detector is None or self.detector.model is None:
             self.get_logger().warn("检测器未就绪")
             return
 
         try:
             points = pointcloud2_to_numpy(msg)
-            # 只取 XYZ（忽略 RGB/D），mmdet3d VoteNet 只接受 3 通道输入
+            self.get_logger().debug(f"收到点云: shape={points.shape}, dtype={points.dtype}")
+
+            # 只取 XYZ（忽略 RGB），mmdet3d VoteNet 只接受 3 通道输入
             if points.shape[1] > 3:
                 points = points[:, :3]
+                self.get_logger().debug(f"提取 XYZ: shape={points.shape}")
 
             if len(points) < 100:
                 self.get_logger().warn("点云点数过少，跳过检测")
                 return
 
             detections = self.detector.detect(points)
-            self.get_logger().info(f"检测到 {len(detections)} 个目标")
+            self.get_logger().debug(f"检测到 {len(detections)} 个目标")
             if detections:
                 detection_msg = self._create_detection_msg(detections, msg.header)
                 self.detections_pub.publish(detection_msg)
