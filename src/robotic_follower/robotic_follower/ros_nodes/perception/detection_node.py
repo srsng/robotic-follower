@@ -78,7 +78,7 @@ class DetectionNode(Node):
         self.declare_parameter("config_file", self.DEFAULT_CONFIG)
 
         config_file = os.path.expanduser(self.get_parameter("config_file").value)
-        # config_file = self._resolve_path(config_file)
+        config_file = self._resolve_path(config_file)
 
         # 加载配置
         self.detector = None
@@ -157,7 +157,9 @@ class DetectionNode(Node):
 
         try:
             points = pointcloud2_to_numpy(msg)
-            self.get_logger().debug(f"收到点云，共 {len(points)} 个点")
+            # 只取 XYZ（忽略 RGB/D），mmdet3d VoteNet 只接受 3 通道输入
+            if points.shape[1] > 3:
+                points = points[:, :3]
 
             if len(points) < 100:
                 self.get_logger().warn("点云点数过少，跳过检测")
