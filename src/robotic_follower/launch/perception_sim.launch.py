@@ -40,7 +40,7 @@ def get_visualizer_node(context, visualizer_type):
     """根据 visualizer_type 返回对应的可视化节点列表。"""
     viz_type = context.perform_substitution(visualizer_type)
     assert viz_type in ("open3d", "rivz")
-    
+
     if viz_type == "open3d":
         return [
             Node(
