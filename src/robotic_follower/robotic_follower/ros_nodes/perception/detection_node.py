@@ -173,7 +173,7 @@ class DetectionNode(Node):
             if detections:
                 detection_msg = self._create_detection_msg(detections, msg.header)
                 self.detections_pub.publish(detection_msg)
-                self.get_logger().info("已发布检测结果")
+                self.get_logger().debug("已发布检测结果")
 
         except Exception as e:
             self.get_logger().error(f"检测失败: {e}")
