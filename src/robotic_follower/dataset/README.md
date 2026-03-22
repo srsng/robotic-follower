@@ -63,7 +63,7 @@ MiniSUNRGBD 是 SUNRGBD 的子集，专门用于桌面物体 3D 检测。包含 
 | 数据集类     | `~/ws/py/mmdetection3d/mmdet3d/datasets/mini_sunrgbd_dataset.py`        |
 | 数据集配置   | `~/ws/py/mmdetection3d/configs/_base_/datasets/mini_sunrgbd_3d.py`      |
 | 模型配置     | `~/ws/py/mmdetection3d/configs/votenet_mini_sunrgbd.py`                 |
-| 数据转换脚本 | `~/ros2_ws/src/robotic_follower/dataset/mini_sunrgbd_converter.py`      |
+| 数据转换脚本 | `~/ws/py/mmdetection3d/data2/mini_sunrgbd/mini_sunrgbd_converter.py`    |
 
 ---
 
@@ -86,7 +86,7 @@ python tools/train.py configs/votenet_mini_sunrgbd.py --resume work_dirs/votenet
 
 ## 数据转换
 
-数据转换脚本位于 `~/ros2_ws/src/robotic_follower/dataset/mini_sunrgbd_converter.py`，功能包括：
+数据转换脚本位于 `~/ws/py/mmdetection3d/data2/mini_sunrgbd/mini_sunrgbd_converter.py`，功能包括：
 
 1. **文件复制**: 从 SUNRGBD 复制子集文件到 MiniSUNRGBD
    - `points/{idx}.bin` - 点云数据
@@ -103,9 +103,9 @@ python tools/train.py configs/votenet_mini_sunrgbd.py --resume work_dirs/votenet
 ```bash
 cd ~/ws/py/mmdetection3d
 
-python3 ~/ros2_ws/src/robotic_follower/dataset/mini_sunrgbd_converter.py \
+python3 ./data2/mini_sunrgbd/mini_sunrgbd_converter.py \
     --root-path ./data2/sunrgbd \
-    --mini-config ~/ros2_ws/src/robotic_follower/dataset/MiniSUNRGBD.json \
+    --mini-config ./data2/mini_sunrgbd/MiniSUNRGBD.json \
     --out-dir ./data2/mini_sunrgbd \
     --sample-limit 50 \
     --min-samples 18 \
@@ -114,20 +114,11 @@ python3 ~/ros2_ws/src/robotic_follower/dataset/mini_sunrgbd_converter.py \
 
 参数说明：
 
-| 参数               | 默认值                                                    | 说明                        |
-| ------------------ | --------------------------------------------------------- | --------------------------- |
-| `--root-path`      | `./data2/sunrgbd`                                         | 源数据集根目录              |
-| `--mini-config`    | `~/ros2_ws/src/robotic_follower/dataset/MiniSUNRGBD.json` | 类别配置 JSON               |
-| `--out-dir`        | `./data2/mini_sunrgbd`                                    | 输出目录                    |
-| `--sample-limit`   | 50                                                        | 每类最大样本数              |
-| `--min-samples`    | 18                                                        | 保留类别的最小样本阈值      |
-| `--negative-ratio` | 0.15                                                      | 负样本比例 (0=不使用负样本) |
-
----
-
-## 注意事项
-
-1. **数据集较小** (320样本)，建议使用预训练权重或迁移学习
-2. **类别不平衡**: notebook(18) 和 phone(12) 样本较少，可能需要考虑数据增强或加权 loss
-3. **负样本比例**: 约 15%，用于训练背景判别能力
-4. **数据根路径**: mmdet3d 配置使用 `data/mini_sunrgbd/`，实际数据在 `data2/mini_sunrgbd/`
+| 参数               | 默认值                                  | 说明                        |
+| ------------------ | --------------------------------------- | --------------------------- |
+| `--root-path`      | `./data2/sunrgbd`                       | 源数据集根目录              |
+| `--mini-config`    | `./data2/mini_sunrgbd/MiniSUNRGBD.json` | 类别配置 JSON               |
+| `--out-dir`        | `./data2/mini_sunrgbd`                  | 输出目录                    |
+| `--sample-limit`   | 50                                      | 每类最大样本数              |
+| `--min-samples`    | 18                                      | 保留类别的最小样本阈值      |
+| `--negative-ratio` | 0.15                                    | 负样本比例 (0=不使用负样本) |
