@@ -33,6 +33,7 @@ import json
 
 import numpy as np
 import rclpy
+import std_srvs.srv
 from rclpy.node import Node
 from std_msgs.msg import String
 
@@ -81,15 +82,15 @@ class CalibrationCalculatorNode(Node):
         )
 
         # 服务
-        from robotic_follower.srv import ExecuteCalibration, ResetCalibration
+        # from robotic_follower.srv import ExecuteCalibration, ResetCalibration
 
         self.execute_srv = self.create_service(
-            ExecuteCalibration,
+            std_srvs.srv.Trigger,
             "/hand_eye_calibration/execute",
             self.execute_callback,
         )
         self.reset_srv = self.create_service(
-            ResetCalibration,
+            std_srvs.srv.Trigger,
             "/hand_eye_calibration/reset",
             self.reset_callback,
         )
@@ -110,9 +111,9 @@ class CalibrationCalculatorNode(Node):
 
     def execute_callback(
         self,
-        request: None,
-        response: "ExecuteCalibration.Response",
-    ) -> "ExecuteCalibration.Response":
+        request: std_srvs.srv.Trigger.Request,
+        response: std_srvs.srv.Trigger.Response,
+    ) -> std_srvs.srv.Trigger.Response:
         """执行标定计算。"""
 
         if len(self.samples) < self.min_samples:
@@ -177,9 +178,9 @@ class CalibrationCalculatorNode(Node):
 
     def reset_callback(
         self,
-        request: None,
-        response: "ResetCalibration.Response",
-    ) -> "ResetCalibration.Response":
+        request: std_srvs.srv.Trigger.Request,
+        response: std_srvs.srv.Trigger.Response,
+    ) -> std_srvs.srv.Trigger.Response:
         """重置标定数据。"""
 
         self.samples = []

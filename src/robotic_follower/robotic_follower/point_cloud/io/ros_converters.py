@@ -1,7 +1,37 @@
 """点云消息转换工具。"""
 
 import numpy as np
+from geometry_msgs.msg import Pose
+from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import PointCloud2, PointField
+
+
+def geometry_pose_to_transform_matrix(pose: Pose) -> np.ndarray:
+    """
+    将 ROS geometry_msgs/Pose 转换为 4x4 变换矩阵。
+
+    Args:
+        pose: ROS Pose 消息
+
+    Returns:
+        4x4 numpy 数组表示的齐次变换矩阵
+    """
+    transform = np.eye(4)
+    transform[0, 3] = pose.position.x
+    transform[1, 3] = pose.position.y
+    transform[2, 3] = pose.position.z
+
+    r = Rotation.from_quat(
+        [
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        ]
+    )
+    transform[:3, :3] = r.as_matrix()
+
+    return transform
 
 
 def numpy_to_pointcloud2(

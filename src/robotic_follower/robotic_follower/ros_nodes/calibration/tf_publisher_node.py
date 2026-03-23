@@ -26,6 +26,7 @@ import geometry_msgs.msg
 import rclpy
 import std_srvs.srv
 from rclpy.node import Node
+from rcl_interfaces.msg import SetParametersResult
 from tf2_ros import TransformBroadcaster
 
 
@@ -86,7 +87,7 @@ class TFPublisherNode(Node):
         self.current_transform.transform.rotation.z = 0.0
         self.current_transform.transform.rotation.w = 1.0
 
-    def parameter_callback(self, params: list) -> rclpy.node.Handle:
+    def parameter_callback(self, params: list) -> SetParametersResult:
         """参数变化回调。"""
         for param in params:
             if param.name == f"{self.config_namespace}.translation":
@@ -101,7 +102,7 @@ class TFPublisherNode(Node):
                     self.current_transform.transform.rotation.y = param.value[1]
                     self.current_transform.transform.rotation.z = param.value[2]
                     self.current_transform.transform.rotation.w = param.value[3]
-        return rclpy.node.Handle.ACCEPT
+        return SetParametersResult(successful=True)
 
     def update_transform_from_parameters(self):
         """从参数服务器更新变换。"""

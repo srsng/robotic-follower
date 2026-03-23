@@ -45,6 +45,8 @@ import time
 
 import numpy as np
 import rclpy
+import std_msgs.msg
+import std_srvs.srv
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from ros2_aruco_interfaces.msg import ArucoMarkers
@@ -117,7 +119,7 @@ class CalibrationSamplerNode(Node):
         )
 
         # 服务
-        from robotic_follower.srv import AddCalibrationSample
+        # from robotic_follower.srv import AddCalibrationSample
 
         self.start_srv = self.create_service(
             std_srvs.srv.Trigger,
@@ -130,7 +132,7 @@ class CalibrationSamplerNode(Node):
             self.stop_sampling_callback,
         )
         self.add_srv = self.create_service(
-            AddCalibrationSample,
+            std_srvs.srv.Trigger,
             "/hand_eye_calibration/add_sample",
             self.add_sample_callback,
         )
@@ -243,28 +245,22 @@ class CalibrationSamplerNode(Node):
 
     def add_sample_callback(
         self,
-        request: None,
-        response: "AddCalibrationSample.Response",
-    ) -> "AddCalibrationSample.Response":
+        request: std_srvs.srv.Trigger.Request,
+        response: std_srvs.srv.Trigger.Response,
+    ) -> std_srvs.srv.Trigger.Response:
         """手动添加样本服务回调。"""
-
-        response.min_samples = 15  # 与文档规格一致
-        response.max_samples = 50
 
         if not self.is_sampling:
             response.success = False
-            response.sample_count = self.sample_count
-            response.message = "未开始采样"
+            response.message = f"未开始采样，当前样本数: {self.sample_count}"
             return response
 
         if self.try_add_sample():
             response.success = True
-            response.sample_count = self.sample_count
             response.message = f"已添加样本 #{self.sample_count}"
         else:
             response.success = False
-            response.sample_count = self.sample_count
-            response.message = "添加样本失败"
+            response.message = f"添加样本失败，当前样本数: {self.sample_count}"
         return response
 
 
