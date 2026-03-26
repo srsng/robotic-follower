@@ -187,7 +187,9 @@ class DetectionNode(Node):
         for det in detections:
             detection = Detection3D()
             bbox = det["bbox"]
-            detection.bbox.center.position = Point(x=bbox[0], y=bbox[1], z=bbox[2])
+            # 修复：mmdet3d 中 SUNRGBD 数据集的 z 坐标是底部中心，而 ROS2 Detection3D 和 Open3D 期望几何中心
+            # 因此需要将 z 加上高度的一半 (dz / 2)
+            detection.bbox.center.position = Point(x=bbox[0], y=bbox[1], z=bbox[2] + bbox[5] / 2.0)
             detection.bbox.size = Vector3(x=bbox[3], y=bbox[4], z=bbox[5])
             detection.bbox.center.orientation = self._yaw_to_quaternion(bbox[6])
 
