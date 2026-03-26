@@ -148,8 +148,8 @@ class PlanningNode(Node):
             self.moveit2 = MoveIt2(
                 node=self,
                 joint_names=[
-                    "joint1", "joint2", "joint3",
-                    "joint4", "joint5", "joint6",
+                    "Joint1", "Joint2", "Joint3",
+                    "Joint4", "Joint5", "Joint6",
                 ],
                 base_link_name=self.robot_base_frame,
                 end_effector_name=self.end_effector_frame,

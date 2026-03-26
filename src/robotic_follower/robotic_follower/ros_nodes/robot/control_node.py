@@ -66,10 +66,10 @@ class ArmControlNode(Node):
         # 回调组
         callback_group = ReentrantCallbackGroup()
 
-        # 关节名称常量 (使用 SRDF 中的实际名称，小写)
+        # 关节名称常量 (与 URDF/SRDF 一致，大写)
         self.joint_names = [
-            "joint1", "joint2", "joint3",
-            "joint4", "joint5", "joint6",
+            "Joint1", "Joint2", "Joint3",
+            "Joint4", "Joint5", "Joint6",
         ]
         self.base_link_name = robot.base_link_name()
         self.end_effector_name = robot.end_effector_name()

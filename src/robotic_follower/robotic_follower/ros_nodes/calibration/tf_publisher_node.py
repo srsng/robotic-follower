@@ -108,13 +108,8 @@ class TFPublisherNode(Node):
         """从参数服务器更新变换。"""
         try:
             # 读取平移
-            translation_param = self.get_parameter_or(
-                f"{self.config_namespace}.translation",
-                rclpy.parameter.Parameter(
-                    f"{self.config_namespace}.translation",
-                    rclpy.Parameter.Type.DOUBLE_ARRAY,
-                    [0.0, 0.0, 0.0],
-                ),
+            translation_param = self.get_parameter(
+                f"{self.config_namespace}.translation"
             )
             if translation_param.type == rclpy.Parameter.Type.DOUBLE_ARRAY:
                 t = translation_param.value
@@ -123,13 +118,8 @@ class TFPublisherNode(Node):
                 self.current_transform.transform.translation.z = t[2]
 
             # 读取旋转（四元数）
-            rotation_param = self.get_parameter_or(
-                f"{self.config_namespace}.rotation",
-                rclpy.parameter.Parameter(
-                    f"{self.config_namespace}.rotation",
-                    rclpy.Parameter.Type.DOUBLE_ARRAY,
-                    [0.0, 0.0, 0.0, 1.0],
-                ),
+            rotation_param = self.get_parameter(
+                f"{self.config_namespace}.rotation"
             )
             if rotation_param.type == rclpy.Parameter.Type.DOUBLE_ARRAY:
                 q = rotation_param.value
