@@ -232,6 +232,16 @@ def main(args=None):
     scrollable_list.add_child(detection_label)
     side_panel.add_child(scrollable_list)
 
+    # 添加标定控制面板（可选）
+    node.declare_parameter("enable_calibration_panel", False)
+    if node.get_parameter("enable_calibration_panel").value:
+        from robotic_follower.visualization.calibration_ui_panel import (
+            CalibrationUIPanel,
+        )
+
+        calibration_panel = CalibrationUIPanel(window, em, node)
+        side_panel.add_child(calibration_panel.panel)
+
     window.add_child(widget3d)
     window.add_child(side_panel)
 
