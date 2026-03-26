@@ -57,6 +57,7 @@ setup(
             # === 机器人节点 ===
             "arm_control=robotic_follower.ros_nodes.robot.control_node:main",
             "motion_planning=robotic_follower.ros_nodes.robot.planning_node:main",
+            "joint_state_remapper=robotic_follower.ros_nodes.robot.joint_state_remapper_node:main",
         ],
     },
 )
