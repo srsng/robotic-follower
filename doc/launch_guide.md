@@ -16,22 +16,22 @@
 
 ### 按场景分类
 
-| 分类 | Launch 文件 | 功能 |
-|------|------------|------|
-| **完整系统** | `visual_follow_demo.launch.py` | 端到端视觉跟随演示 |
-| **标定** | `calibration_full.launch.py`, `calibration_minimal.launch.py` | 手眼标定流程 |
-| **感知测试** | `perception_real.launch.py`, `perception_sim.launch.py` | 实机/仿真感知 |
-| **机械臂测试** | `arm_simulation.launch.py` | 运动规划与控制 |
-| **单元测试** | `test_pointcloud.launch.py`, `test_detection.launch.py` | 模块级测试 |
+| 分类           | Launch 文件                                                   | 功能               |
+| -------------- | ------------------------------------------------------------- | ------------------ |
+| **完整系统**   | `visual_follow_demo.launch.py`                                | 端到端视觉跟随演示 |
+| **标定**       | `calibration_full.launch.py`, `calibration_minimal.launch.py` | 手眼标定流程       |
+| **感知测试**   | `perception_real.launch.py`, `perception_sim.launch.py`       | 实机/仿真感知      |
+| **机械臂测试** | `arm_simulation.launch.py`                                    | 运动规划与控制     |
+| **单元测试**   | `test_pointcloud.launch.py`, `test_detection.launch.py`       | 模块级测试         |
 
 ### 常用启动参数
 
-| 参数 | 类型 | 默认值 | 说明 |
-|-----|------|--------|------|
-| `use_sim_time` | bool | `false` | 使用仿真时间 |
-| `bin_file` | string | - | .bin 点云文件路径（sim 测试用） |
-| `sunrgbd_idx` | int | -1 | SUNRGBD 样本索引（sim 测试用） |
-| `run_detection` | bool | `true` | 是否运行 3D 检测 |
+| 参数            | 类型   | 默认值  | 说明                            |
+| --------------- | ------ | ------- | ------------------------------- |
+| `use_sim_time`  | bool   | `false` | 使用仿真时间                    |
+| `bin_file`      | string | -       | .bin 点云文件路径（sim 测试用） |
+| `sunrgbd_idx`   | int    | -1      | SUNRGBD 样本索引（sim 测试用）  |
+| `run_detection` | bool   | `true`  | 是否运行 3D 检测                |
 
 ---
 
@@ -78,7 +78,7 @@ ros2 launch robotic_follower calibration_full.launch.py use_sim_time:=true
 **功能**: 实机感知模块 + 可视化
 
 **包含节点**:
-1. realsense_node (RealSense D435i 数据采集)
+1. camera_rs_node (RealSense D435i 数据采集)
 2. pointcloud_processor (点云滤波处理)
 3. detection_node (3D 目标检测)
 4. rviz_visualizer (RViz 可视化转换)
@@ -117,11 +117,11 @@ ros2 launch robotic_follower perception_real.launch.py
 - SUNRGBD 数据集验证
 
 **启动参数**:
-| 参数 | 类型 | 默认值 | 说明 |
-|-----|------|--------|------|
-| `bin_file` | string | - | .bin 点云文件路径 |
-| `sunrgbd_idx` | int | -1 | SUNRGBD 样本索引 |
-| `run_detection` | bool | `true` | 是否运行检测 |
+| 参数            | 类型   | 默认值 | 说明              |
+| --------------- | ------ | ------ | ----------------- |
+| `bin_file`      | string | -      | .bin 点云文件路径 |
+| `sunrgbd_idx`   | int    | -1     | SUNRGBD 样本索引  |
+| `run_detection` | bool   | `true` | 是否运行检测      |
 
 **启动命令**:
 ```bash
@@ -327,14 +327,14 @@ config_path = PathJoinSubstitution([
 
 ## 故障排查
 
-| 问题 | 可能原因 | 解决方案 |
-|-----|----------|--------|
-| 节点无法启动 | 包未编译 | 运行 `colcon build --packages-select robotic_follower` |
-| 相机话题无数据 | 相机未连接 | 检查 USB 权限，重新插拔相机 |
-| 标定采样不工作 | ArUco 检测失败 | 检查标定板可见性和光照条件 |
-| TF 未发布 | 标定未完成或结果未加载 | 检查 `results/calibration.yaml` 是否存在 |
-| RViz 无显示 | 配置文件路径错误 | 检查 launch 文件中的 RViz 配置路径 |
-| 服务调用超时 | 节点未启动或服务名错误 | 使用 `ros2 service list` 检查服务名 |
+| 问题           | 可能原因               | 解决方案                                               |
+| -------------- | ---------------------- | ------------------------------------------------------ |
+| 节点无法启动   | 包未编译               | 运行 `colcon build --packages-select robotic_follower` |
+| 相机话题无数据 | 相机未连接             | 检查 USB 权限，重新插拔相机                            |
+| 标定采样不工作 | ArUco 检测失败         | 检查标定板可见性和光照条件                             |
+| TF 未发布      | 标定未完成或结果未加载 | 检查 `results/calibration.yaml` 是否存在               |
+| RViz 无显示    | 配置文件路径错误       | 检查 launch 文件中的 RViz 配置路径                     |
+| 服务调用超时   | 节点未启动或服务名错误 | 使用 `ros2 service list` 检查服务名                    |
 
 ---
 

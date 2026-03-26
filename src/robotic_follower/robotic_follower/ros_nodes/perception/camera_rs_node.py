@@ -44,7 +44,7 @@ class RealSenseNode(Node):
     """RealSense D435i 数据采集节点。"""
 
     def __init__(self):
-        super().__init__("realsense_node")
+        super().__init__("camera_rs_node")
 
         # 声明参数
         self.declare_parameter("align_depth.enable", True)
@@ -54,7 +54,7 @@ class RealSenseNode(Node):
         self.declare_parameter("rgb_camera.profile", "640x480x30")
         self.declare_parameter("camera_namespace", "")
 
-        self.get_logger().info("RealSense D435i 节点已初始化")
+        self.get_logger().info("camera_rs_node (RealSense D435i) 节点已初始化")
         self.get_logger().info("注意：请使用 launch 文件启动 realsense2_camera")
 
 

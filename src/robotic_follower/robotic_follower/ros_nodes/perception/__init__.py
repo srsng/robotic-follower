@@ -3,7 +3,7 @@
 from .camera_sim_node import CameraSimNode
 from .detection_node import DetectionNode
 from .pointcloud_processor import PointCloudProcessorNode
-from .realsense_node import RealSenseNode
+from .camera_rs_node import RealSenseNode
 
 
 __all__ = [

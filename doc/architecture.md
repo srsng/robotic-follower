@@ -290,7 +290,7 @@ robotic_follower/
 │   │   │
 │   │   ├── perception/        # 感知节点
 │   │   │   ├── __init__.py
-│   │   │   ├── realsense_node.py
+│   │   │   ├── camera_rs_node.py
 │   │   │   ├── camera_sim_node.py
 │   │   │   ├── pointcloud_processor.py
 │   │   │   └── detection_node.py

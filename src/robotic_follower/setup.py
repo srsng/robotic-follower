@@ -42,7 +42,7 @@ setup(
     entry_points={
         "console_scripts": [
             # === 感知模块节点 ===
-            "realsense_node=robotic_follower.ros_nodes.perception.realsense_node:main",
+            "camera_rs_node=robotic_follower.ros_nodes.perception.camera_rs_node:main",
             "camera_sim_node=robotic_follower.ros_nodes.perception.camera_sim_node:main",
             "pointcloud_processor=robotic_follower.ros_nodes.perception.pointcloud_processor:main",
             "detection_node=robotic_follower.ros_nodes.perception.detection_node:main",
