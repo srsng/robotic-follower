@@ -16,7 +16,7 @@ setup(
         # 模型文件
         (
             os.path.join("share", package_name, "model", "config"),
-            ["model/config/votenet_config.yaml"],
+            glob("model/config/*.yaml"),
         ),
         (
             os.path.join("share", package_name, "model", "detection", "votenet"),
