@@ -21,7 +21,7 @@
     - /camera/color/image_raw (sensor_msgs/Image)
         RGB 彩色图像
     - /camera/aligned_depth_to_color/image_raw (sensor_msgs/Image)
-        深度图（用于生成点云备选）
+        深度图
     - /camera/color/camera_info (sensor_msgs/CameraInfo)
         相机内参（用于深度图转点云）
 
@@ -48,10 +48,6 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from vision_msgs.msg import Detection3DArray
 
-from robotic_follower.point_cloud.io.projection import (
-    colorize_pointcloud,
-    depth_image_to_pointcloud,
-)
 from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
 
 
@@ -286,16 +282,6 @@ def main(args=None):
             rgb = node.current_rgb_image
             depth = node.current_depth_image
             cam_info = node.current_camera_info
-
-        # 如果没有外部点云，尝试从深度图生成点云
-        if points is None and depth is not None and cam_info is not None:
-            fx = cam_info.k[0]
-            fy = cam_info.k[4]
-            cx = cam_info.k[2]
-            cy = cam_info.k[5]
-            points = depth_image_to_pointcloud(depth, fx, fy, cx, cy, depth_scale=0.001)
-            if rgb is not None and points is not None:
-                points = colorize_pointcloud(points, rgb)
 
         if points is None:
             return
