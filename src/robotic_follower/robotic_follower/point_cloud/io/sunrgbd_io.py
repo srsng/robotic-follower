@@ -9,20 +9,25 @@ from typing import Any
 import cv2
 import numpy as np
 
-
 ROOT = Path(os.path.expanduser("~/ws/py/mmdetection3d/data2/sunrgbd"))
-assert ROOT.exists(), f"SUN RGB-D数据集目录未找到: {ROOT}"
-
 bin_root = ROOT / "points"
+
+IS_MINI = False
+if not bin_root.exists():
+    ROOT = Path(os.path.expanduser("~/ws/py/mmdetection3d/data2/mini_sunrgbd"))
+    bin_root = ROOT / "points"
+    IS_MINI = True
+    print("WARN：SUN RGB-D 未找到，将使用mini_sunrgbd")
+
 img_root = ROOT / "sunrgbd_trainval" / "image"
 calib_root = ROOT / "sunrgbd_trainval" / "calib"
 
 train_pkl_path = ROOT / "sunrgbd_infos_train.pkl"
 val_pkl_path = ROOT / "sunrgbd_infos_val.pkl"
 
-assert bin_root.exists(), "SUN RGB-D数据集异常"
-assert train_pkl_path.exists(), f"SUN RGB-D训练集索引未找到: {train_pkl_path}"
-assert val_pkl_path.exists(), f"SUN RGB-D验证集索引未找到: {val_pkl_path}"
+# assert bin_root.exists(), "SUN RGB-D数据集异常"
+# assert train_pkl_path.exists(), f"SUN RGB-D训练集索引未找到: {train_pkl_path}"
+# assert val_pkl_path.exists(), f"SUN RGB-D验证集索引未找到: {val_pkl_path}"
 
 
 def find_bin_file_path(idx: int) -> Path | None:
