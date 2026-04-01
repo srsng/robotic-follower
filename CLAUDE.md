@@ -146,7 +146,7 @@ ros2 node info /node_name
 
 ## 技术选型规范
 
-+ 优先使用python，其次才是C++
++ 优先使用python3，其次才是C++
 + 优先使用社区成熟方案/库
 + 保证可用、稳定的前提下，优先使用复杂度较低的方案/库
 
@@ -253,16 +253,16 @@ colcon test-result --verbose
 cd /home/srsnn/ws/py/mmdetection3d
 
 # 基线 VoteNet 训练
-python tools/train.py ~/ros2_ws/src/perception/configs/votenet_sunrgbd_baseline.py
+python3 tools/train.py ~/ros2_ws/src/perception/configs/votenet_sunrgbd_baseline.py
 
 # 密度融合 VoteNet 训练
-python tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py
+python3 tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py
 
 # 多 GPU 训练
 bash tools/dist_train.sh ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py 2
 
 # 继续训练
-python tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+python3 tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
     --resume work_dirs/density_votenet_sunrgbd/latest.pth
 ```
 
@@ -272,11 +272,11 @@ python tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.p
 cd /home/srsnn/ws/py/mmdetection3d
 
 # 评估模型
-python tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+python3 tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
     work_dirs/density_votenet_sunrgbd/best.pth
 
 # 可视化评估结果
-python tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
+python3 tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
     work_dirs/density_votenet_sunrgbd/best.pth --show
 ```
 
@@ -329,7 +329,7 @@ rviz2 -d config/default.rviz
 
 1. 创建 srv 文件在 `src/package_name/srv/`
 2. 在 `package.xml` 添加 `<build_depend>rosidl_default_generators</build_depend>`
-3. 在 `CMakeLists.txt` 添加服务生成（C++）或更新依赖（Python）
+3. 在 `CMakeLists.txt` 添加服务生成（C++）或更新依赖（Python3）
 4. 在节点中创建服务提供者
 
 ### 添加新的消息
@@ -456,7 +456,7 @@ realsense2_camera → perception → visual_follow → MoveIt2/PyMoveIt2 → dum
 | `/camera/depth/image_rect_raw`             | `sensor_msgs/Image`            | realsense2_camera    |
 | `/camera/aligned_depth_to_color/image_raw` | `sensor_msgs/Image`            | realsense2_camera    |
 | `/camera/color/camera_info`                | `sensor_msgs/CameraInfo`       | realsense2_camera    |
-| `/perception/processed_pointcloud`         | `sensor_msgs/PointCloud2`      | perception           |
+| `/camera/camera/depth/color/points`        | `sensor_msgs/PointCloud2`      | realsense2_camera    |
 | `/perception/detections`                   | `vision_msgs/Detection3DArray` | perception           |
 | `/joint_states`                            | `sensor_msgs/JointState`       | dummy_arm_controller |
 
