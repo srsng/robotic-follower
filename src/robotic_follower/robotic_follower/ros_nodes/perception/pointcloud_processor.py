@@ -58,6 +58,8 @@ from robotic_follower.point_cloud.io.converters import (
 )
 from robotic_follower.point_cloud.io.ros_converters import numpy_to_pointcloud2
 
+import numpy as np
+
 
 class PointCloudProcessorNode(Node):
     """点云处理器节点。"""
@@ -175,17 +177,25 @@ class PointCloudProcessorNode(Node):
                     colorize_pointcloud,
                 )
 
+                # 构建 3x3 内参矩阵 K（从字典转换为 numpy 数组）
+                fx = self.camera_intrinsics["fx"]
+                fy = self.camera_intrinsics["fy"]
+                cx = self.camera_intrinsics["cx"]
+                cy = self.camera_intrinsics["cy"]
+                K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+
                 colored = colorize_pointcloud(
-                    filtered_points[:, :3], self.rgb_image, None, self.camera_intrinsics
+                    filtered_points[:, :3], self.rgb_image, None, K
                 )
-                if colored is not None:
-                    filtered_points = colored
 
             # 发布点云
+            # 根据点云维度决定是否打包 RGB（RViz RGB8 颜色变换需要 pack_rgb=True）
+            has_color = filtered_points.shape[1] == 6
             pointcloud_msg = numpy_to_pointcloud2(
                 filtered_points,
                 frame_id="camera_depth_optical_frame",
                 stamp=msg.header.stamp,
+                pack_rgb=has_color,
             )
             self.pointcloud_pub.publish(pointcloud_msg)
 

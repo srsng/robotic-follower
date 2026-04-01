@@ -26,9 +26,6 @@
 
     # RViz 可视化（需要 DISPLAY 环境变量）
     ros2 launch robotic_follower perception_sim.launch.py gui:=rviz
-
-    # RViz 不显示机械臂模型
-    ros2 launch robotic_follower perception_sim.launch.py gui:=rviz use_robot_model:=false
 """
 
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
@@ -55,14 +52,13 @@ def get_visualizer_node(context, visualizer_type):
             )
         ]
 
-    # rviz: 包含机械臂模型 + 感知数据转发 + RViz2 窗口
+    # rviz: 感知数据转发 + RViz2 窗口
     return [
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([
                 FindPackageShare("robotic_follower"), "/launch/rviz_perception.launch.py"
             ]),
             launch_arguments={
-                "use_robot_model": "true",
                 "rviz_config": "default",
             }.items(),
         )
@@ -95,7 +91,15 @@ def generate_launch_description():
         ],
     )
 
-    # 2. 3D 检测器
+    # # 2. 点云处理器
+    # pointcloud_processor_node = Node(
+    #     package='robotic_follower',
+    #     executable='pointcloud_processor',
+    #     name='pointcloud_processor',
+    #     output='screen',
+    # )
+
+    # 3. 3D 检测器
     detection_node = Node(
         package="robotic_follower",
         executable="detection_node",
@@ -103,7 +107,7 @@ def generate_launch_description():
         output="screen",
     )
 
-    # 3. 可视化节点
+    # 4. 可视化节点
     visualizer_node = OpaqueFunction(
         function=get_visualizer_node, args=[visualizer_type]
     )

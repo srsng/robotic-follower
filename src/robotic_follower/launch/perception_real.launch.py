@@ -2,15 +2,15 @@
 """实机感知启动文件。
 
 启动完整的感知流水线用于实机测试：
-1. RealSense D435i 相机
-2. 点云处理器
-3. 3D 检测器
-4. RViz 可视化
+1. RealSense D435i 相机（原生点云）
+2. 3D 检测器（消费 realsense 原生点云）
+3. RViz 可视化（点云 + 检测包围盒）
 
-使用场景：
-    - 实机环境下的感知算法测试
-    - 验证相机和检测算法
-    - 性能基准测试
+架构说明：
+    realsense2_camera 发布点云 /camera/camera/depth/color/points
+    → detection_node 订阅，执行 3D 检测
+    → rviz_visualizer_node 转为 MarkerArray
+    → RViz 显示点云和包围盒
 
 启动命令：
     ros2 launch robotic_follower perception_real.launch.py
@@ -31,7 +31,7 @@ def generate_launch_description():
     # 声明启动参数
     use_sim_time = LaunchConfiguration("use_sim_time", default="false")
 
-    # 1. RealSense 相机启动
+    # 1. RealSense 相机启动（启用原生点云）
     realsense_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             [
@@ -42,6 +42,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             "align_depth.enable": "true",
+            "pointcloud.enable": "true",
             "enable_color": "true",
             "enable_depth": "true",
             "depth_module.profile": "640x480x30",
@@ -50,20 +51,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 2. 点云处理器
-    pointcloud_processor_node = Node(
-        package="robotic_follower",
-        executable="pointcloud_processor",
-        name="pointcloud_processor",
-        output="screen",
-        parameters=[
-            {
-                "use_sim_time": use_sim_time,
-            }
-        ],
-    )
-
-    # 3. 3D 检测器
+    # 2. 3D 检测器（订阅 realsense 原生点云）
     detection_node = Node(
         package="robotic_follower",
         executable="detection_node",
@@ -72,17 +60,20 @@ def generate_launch_description():
         parameters=[
             {
                 "use_sim_time": use_sim_time,
-                "config_file": config_file,
+                # todo: 减少数据量
+                "pointcloud_topic": "/camera/camera/depth/color/points",
             }
         ],
     )
 
-    # 4. RViz 可视化
-    rviz_visualizer_node = Node(
-        package="robotic_follower",
-        executable="rviz_visualizer",
-        name="rviz_visualizer",
-        output="screen",
+    # 3. RViz 可视化（使用 perception_rviz.rviz，包含 MarkerArray 显示）
+    rviz_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            FindPackageShare("robotic_follower"), "/launch/rviz_perception.launch.py"
+        ]),
+        launch_arguments={
+            "rviz_config": "perception_rviz",
+        }.items(),
     )
 
     return LaunchDescription(
@@ -93,8 +84,7 @@ def generate_launch_description():
             ),
             # 启动节点
             realsense_launch,
-            pointcloud_processor_node,
             detection_node,
-            rviz_visualizer_node,
+            rviz_launch,
         ]
     )

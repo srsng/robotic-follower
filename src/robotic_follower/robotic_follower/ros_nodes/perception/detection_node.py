@@ -88,9 +88,11 @@ class DetectionNode(Node):
             self.get_logger().error(f"配置文件不存在: {config_file}")
 
         # 订阅话题
+        self.declare_parameter("pointcloud_topic", "/perception/processed_pointcloud")
+        pointcloud_topic = str(self.get_parameter("pointcloud_topic").value)
         self.pointcloud_sub = self.create_subscription(
             PointCloud2,
-            "/perception/processed_pointcloud",
+            pointcloud_topic,
             self.pointcloud_callback,
             10,
         )
