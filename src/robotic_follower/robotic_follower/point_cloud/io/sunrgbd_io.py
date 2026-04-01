@@ -107,6 +107,62 @@ def load_sunrgbd_calib(idx: int) -> tuple[np.ndarray | None, np.ndarray | None]:
     return camera_intrinsic, None
 
 
+def find_calib_file_path(idx: int) -> Path | None:
+    """
+    根据样本编号 idx 查找对应的标定文件路径。
+
+    Args:
+        idx: 数据集样本编号
+
+    Returns:
+        .txt 标定文件路径，或 None（未找到）
+    """
+    calib_path = calib_root / f"{idx:06}.txt"
+    if calib_path.exists():
+        return calib_path
+    return None
+
+
+def load_sunrgbd_calib_file(idx: int) -> dict | None:
+    """
+    从 SUNRGBD calib .txt 文件加载完整标定参数。
+
+    calib txt 文件格式：
+        第 1 行: R 旋转矩阵 (3x3)，共 9 个数
+        第 2 行: K 内参矩阵 (3x3)，共 9 个数
+
+    Args:
+        idx: 数据集样本编号
+
+    Returns:
+        包含 R (3x3), K (3x3) 的字典，或 None（失败时）
+    """
+    calib_path = find_calib_file_path(idx)
+    if calib_path is None:
+        return None
+
+    try:
+        with open(calib_path) as f:
+            lines = f.readlines()
+
+        if len(lines) < 2:
+            return None
+
+        R_vals = [float(x) for x in lines[0].split()]
+        K_vals = [float(x) for x in lines[1].split()]
+
+        if len(R_vals) != 9 or len(K_vals) != 9:
+            return None
+
+        R = np.array(R_vals).reshape(3, 3)
+        K = np.array(K_vals).reshape(3, 3)
+
+        return {"R": R, "K": K}
+    except Exception as e:
+        print(f"⚠ 警告: 加载 calib 文件失败 (idx={idx}): {e}")
+        return None
+
+
 def load_bin_file(file_path: str) -> np.ndarray:
     """
     加载 SUNRGBD 格式的 .bin 点云文件。
@@ -181,6 +237,7 @@ def load_sunrgbd_data(idx: int) -> dict[str, Any]:
             - rgb_path: RGB 图像路径（可选）
             - depth2img: depth2img 矩阵（可选）
             - camera_intrinsic: 相机内参矩阵（可选）
+            - calib_file: 完整标定文件内容 {"R": ..., "K": ...}（可选）
     """
     result = {
         "points": None,
@@ -189,6 +246,7 @@ def load_sunrgbd_data(idx: int) -> dict[str, Any]:
         "rgb_path": None,
         "depth2img": None,
         "camera_intrinsic": None,
+        "calib_file": None,
     }
 
     # 加载点云
@@ -207,5 +265,9 @@ def load_sunrgbd_data(idx: int) -> dict[str, Any]:
     result["depth2img"] = (
         None  # 该数据集版本中 depth2img 即为内参 K，已合并到 camera_intrinsic
     )
+
+    # 加载完整标定文件（R, K）
+    calib_file = load_sunrgbd_calib_file(idx)
+    result["calib_file"] = calib_file
 
     return result

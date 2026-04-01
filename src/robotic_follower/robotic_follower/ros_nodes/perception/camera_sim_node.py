@@ -58,10 +58,12 @@ class CameraSimNode(Node):
         self.declare_parameter("bin_file", "")
         self.declare_parameter("sunrgbd_idx", -1)
         self.declare_parameter("publish_rate", 1.0)
+        self.declare_parameter("pack_rgb", False)
 
         self.bin_file = self.get_parameter("bin_file").value
         self.sunrgbd_idx = self.get_parameter("sunrgbd_idx").value
         publish_rate = self.get_parameter("publish_rate").value
+        self.pack_rgb = self.get_parameter("pack_rgb").value
 
         self.bridge = CvBridge()
         self.points = None
@@ -188,7 +190,7 @@ class CameraSimNode(Node):
 
         # 发布点云
         try:
-            pc_msg = numpy_to_pointcloud2(self.points, frame_id=frame_id, stamp=now)
+            pc_msg = numpy_to_pointcloud2(self.points, frame_id=frame_id, stamp=now, pack_rgb=self.pack_rgb)
             self.pointcloud_pub.publish(pc_msg)
         except Exception as e:
             self.get_logger().error(f"发布点云失败: {e}")

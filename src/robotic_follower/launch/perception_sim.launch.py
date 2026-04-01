@@ -13,21 +13,17 @@
 
 启动命令：
     # 使用 SUNRGBD 索引 + Open3D 可视化（默认）
-    ros2 launch robotic_follower perception_sim.launch.py sunrgbd_idx:=0
+    ros2 launch robotic_follower perception_sim.launch.py sunrgbd_idx:=1
 
     # 使用 .bin 文件 + RViz 可视化
     ros2 launch robotic_follower perception_sim.launch.py bin_file:=/path/to/data.bin gui:=rviz
-
-    # 仅点云处理，不运行检测
-    ros2 launch robotic_follower perception_sim.launch.py run_detection:=false
-
-    # Open3D 可视化（带窗口）
-    ros2 launch robotic_follower perception_sim.launch.py gui:=open3d
-
-    # RViz 可视化（需要 DISPLAY 环境变量）
-    ros2 launch robotic_follower perception_sim.launch.py gui:=rviz
 """
 
+import os
+import tempfile
+import xacro
+
+from ament_index_python.packages import get_package_share_directory
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -35,6 +31,31 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 
 from launch import LaunchDescription
+
+
+def to_urdf(xacro_path, parameters=None):
+    """将 xacro 文件转换为 URDF 文件。"""
+    urdf_path = tempfile.mktemp(prefix="%s_" % os.path.basename(xacro_path))
+    doc = xacro.process_file(xacro_path, mappings=parameters)
+    out = xacro.open_output(urdf_path)
+    out.write(doc.toprettyxml(indent='  '))
+    return urdf_path
+
+
+def set_configurable_parameters(local_params):
+    return dict([(param['name'], LaunchConfiguration(param['name'])) for param in local_params])
+
+
+def declare_configurable_parameters(local_params):
+    return [DeclareLaunchArgument(param['name'], default_value=param['default'], description=param['description']) for param in local_params]
+
+
+local_parameters = [
+    {'name': 'bin_file', 'default': '', 'description': 'Path to the .bin point cloud file'},
+    {'name': 'sunrgbd_idx', 'default': '-1', 'description': 'SUNRGBD dataset sample index number (1 ~ 10335)'},
+    {'name': 'publish_rate', 'default': '1.0', 'description': 'Topic publishing rate (Hz)'},
+    {'name': 'gui', 'default': 'open3d', 'description': 'Visualizer GUI type: "open3d" or "rviz"'},
+]
 
 
 def get_visualizer_node(context, visualizer_type):
@@ -59,7 +80,7 @@ def get_visualizer_node(context, visualizer_type):
                 FindPackageShare("robotic_follower"), "/launch/rviz_perception.launch.py"
             ]),
             launch_arguments={
-                "rviz_config": "default",
+                "rviz_config": "perception_rviz",
             }.items(),
         )
     ]
@@ -67,13 +88,7 @@ def get_visualizer_node(context, visualizer_type):
 
 def generate_launch_description():
     """生成感知仿真系统的 Launch 描述。"""
-
-    # 声明启动参数
-    bin_file = LaunchConfiguration("bin_file", default="")
-    sunrgbd_idx = LaunchConfiguration("sunrgbd_idx", default=-1)
-    run_detection = LaunchConfiguration("run_detection", default="true")
-    publish_rate = LaunchConfiguration("publish_rate", default="1.0")
-    visualizer_type = LaunchConfiguration("gui", default="open3d")
+    params = set_configurable_parameters(local_parameters)
 
     # 1. 模拟相机节点
     camera_sim_node = Node(
@@ -83,21 +98,30 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
-                "bin_file": bin_file,
-                "sunrgbd_idx": sunrgbd_idx,
-                "run_detection": run_detection,
-                "publish_rate": publish_rate,
+                "bin_file": params['bin_file'],
+                "sunrgbd_idx": params['sunrgbd_idx'],
+                "publish_rate": params['publish_rate'],
+                "pack_rgb": str(params['gui']) == "rviz",
             }
         ],
     )
 
-    # # 2. 点云处理器
-    # pointcloud_processor_node = Node(
-    #     package='robotic_follower',
-    #     executable='pointcloud_processor',
-    #     name='pointcloud_processor',
-    #     output='screen',
-    # )
+    # 1.5 D435i URDF 路径（用于 robot_state_publisher 发布相机 TF）
+    xacro_path = os.path.join(
+        get_package_share_directory('realsense2_description'),
+        'urdf', 'test_d435i_camera.urdf.xacro'
+    )
+    camera_urdf = to_urdf(xacro_path, {'use_nominal_extrinsics': 'true', 'add_plug': 'true'})
+
+    # 1.6 robot_state_publisher 发布 D435i 相机 TF
+    robot_state_publisher_node = Node(
+        name='camera_model_node',
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        namespace='',
+        output='screen',
+        arguments=[camera_urdf],
+    )
 
     # 3. 3D 检测器
     detection_node = Node(
@@ -105,42 +129,23 @@ def generate_launch_description():
         executable="detection_node",
         name="detection_node",
         output="screen",
+        parameters=[
+            {
+                "pointcloud_topic": "/camera/camera/depth/color/points",
+            }
+        ],
     )
 
     # 4. 可视化节点
     visualizer_node = OpaqueFunction(
-        function=get_visualizer_node, args=[visualizer_type]
+        function=get_visualizer_node, args=[params['gui']]
     )
 
     return LaunchDescription(
+        declare_configurable_parameters(local_parameters) +
         [
-            DeclareLaunchArgument(
-                "bin_file",
-                default_value="",
-                description="Path to the .bin point cloud file",
-            ),
-            DeclareLaunchArgument(
-                "sunrgbd_idx",
-                default_value="-1",
-                description="SUNRGBD dataset sample index number (1 ~ 10335)",
-            ),
-            DeclareLaunchArgument(
-                "run_detection",
-                default_value="true",
-                description="Run 3D detection on the point cloud",
-            ),
-            DeclareLaunchArgument(
-                "publish_rate",
-                default_value="1.0",
-                description="Topic publishing rate (Hz)",
-            ),
-            DeclareLaunchArgument(
-                "gui",
-                default_value="open3d",
-                description='GUI type of Visualizer: "open3d" (default) or "rviz"',
-            ),
-            # 启动节点
             camera_sim_node,
+            robot_state_publisher_node,
             detection_node,
             visualizer_node,
         ]

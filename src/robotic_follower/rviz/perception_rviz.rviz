@@ -10,9 +10,9 @@ Panels:
         - /RobotModel1/Description Topic1
         - /TF1/Frames1
         - /PointCloud21
-        - /Detection Markers1
         - /Image1
         - /Image2
+        - /Markers1
       Splitter Ratio: 0.36195287108421326
     Tree Height: 308
   - Class: rviz_common/Selection
@@ -250,19 +250,6 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
-    - Class: rviz_default_plugins/MarkerArray
-      Enabled: true
-      Name: Detection Markers
-      Namespaces:
-        wire_boxes: true
-        labels: true
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /perception/detection_markers
-      Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
@@ -290,6 +277,17 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /camera/camera/depth/image_rect_raw
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Markers
+      Namespace: ""
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /perception/detection_markers
       Value: true
   Enabled: true
   Global Options:
