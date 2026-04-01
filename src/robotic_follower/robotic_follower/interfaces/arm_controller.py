@@ -5,28 +5,24 @@
 
 import math
 import time
-from typing import Callable
+from collections.abc import Callable
 
 import rclpy
-from rclpy.node import Node
-from rclpy.action import ActionClient
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import (
-    MotionPlanRequest,
-    WorkspaceParameters,
     Constraints,
     JointConstraint,
-    RobotState,
+    MotionPlanRequest,
 )
-from moveit_msgs.srv import GetMotionPlan
+from rclpy.action import ActionClient
+from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Header
 
 
 # 预定义的标定位姿序列（角度，度）
 CALIBRATION_POSES_DEG = [
-    [0, 0, 0, 0, 0, 0],          # home
+    [0, 0, 0, 0, 0, 0],  # home
     [-18.90, -3.20, 41.33, -159.28, -39.21, -166.98],  # target1
     [0, -36.04, -21.09, 0, -89.63, 0],  # view
     [-12.09, -27.57, 57.24, -144.14, -35.39, -152.68],  # pre
@@ -34,17 +30,17 @@ CALIBRATION_POSES_DEG = [
     [-33.87, 14.76, 36.59, -39.87, 59.11, -24.48],  # output
     [-147.77, -19.41, -8.12, 159.16, 83.79, 151.15],  # preget
     [-164.47, -34.70, 36.44, 168.89, 49.07, 159.27],  # get
-    [123.36, -27.37, 72.08, -93.87, 90.00, -44.41],   # put
-    [0, -60, -30, 0, -90, 0],      # 额外位姿1
+    [123.36, -27.37, 72.08, -93.87, 90.00, -44.41],  # put
+    [0, -60, -30, 0, -90, 0],  # 额外位姿1
     [-45, -30, 45, -120, -45, -90],  # 额外位姿2
-    [45, -20, 30, -60, 30, -45],   # 额外位姿3
-    [-90, -45, 60, -90, 60, -135], # 额外位姿4
-    [30, -45, -30, 90, -60, 45],   # 额外位姿5
+    [45, -20, 30, -60, 30, -45],  # 额外位姿3
+    [-90, -45, 60, -90, 60, -135],  # 额外位姿4
+    [30, -45, -30, 90, -60, 45],  # 额外位姿5
     [-60, -20, 20, -45, 45, -60],  # 额外位姿6
-    [0, -90, 0, 0, -90, 0],        # 额外位姿7
+    [0, -90, 0, 0, -90, 0],  # 额外位姿7
     [60, -30, 45, -150, 30, -30],  # 额外位姿8
     [-30, -60, 30, -30, 60, -90],  # 额外位姿9
-    [0, -45, -45, 0, -90, 0],      # 额外位姿10
+    [0, -45, -45, 0, -90, 0],  # 额外位姿10
 ]
 
 
@@ -66,25 +62,22 @@ class ArmController:
             node: ROS2 节点
         """
         self.node = node
-        self.joint_names = ['Joint1', 'Joint2', 'Joint3', 'Joint4', 'Joint5', 'Joint6']
+        self.joint_names = ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Joint6"]
 
         # 订阅关节状态
         self.joint_state_sub = node.create_subscription(
-            JointState,
-            'joint_states',
-            self._joint_state_callback,
-            10
+            JointState, "joint_states", self._joint_state_callback, 10
         )
 
         # MoveGroup action 客户端
-        self.move_group_client = ActionClient(node, MoveGroup, '/move_action')
+        self.move_group_client = ActionClient(node, MoveGroup, "/move_action")
 
         # 等待服务
-        self.node.get_logger().info('等待 MoveGroup action 服务...')
+        self.node.get_logger().info("等待 MoveGroup action 服务...")
         if not self.move_group_client.wait_for_server(timeout_sec=10.0):
-            self.node.get_logger().error('MoveGroup action 服务不可用')
+            self.node.get_logger().error("MoveGroup action 服务不可用")
         else:
-            self.node.get_logger().info('MoveGroup action 服务已连接')
+            self.node.get_logger().info("MoveGroup action 服务已连接")
 
         self.current_joint_positions = None
 
@@ -139,7 +132,7 @@ class ArmController:
         goal = self._create_move_group_goal(joints_rad)
         goal_handle = self._send_goal_and_wait(goal)
         if goal_handle is None or not goal_handle.accepted:
-            self.node.get_logger().error('目标被拒绝')
+            self.node.get_logger().error("目标被拒绝")
             return False
 
         if wait:
@@ -168,9 +161,13 @@ class ArmController:
 
         # 起始状态
         motion_plan_request.start_state.joint_state.header = Header()
-        motion_plan_request.start_state.joint_state.header.stamp = self.node.get_clock().now().to_msg()
+        motion_plan_request.start_state.joint_state.header.stamp = (
+            self.node.get_clock().now().to_msg()
+        )
         motion_plan_request.start_state.joint_state.name = self.joint_names
-        motion_plan_request.start_state.joint_state.position = self.current_joint_positions or [0.0] * 6
+        motion_plan_request.start_state.joint_state.position = (
+            self.current_joint_positions or [0.0] * 6
+        )
 
         # 目标约束
         joint_constraints = []
@@ -204,12 +201,12 @@ class ArmController:
         Returns:
             GoalHandle 或 None
         """
-        self.node.get_logger().info('发送运动目标...')
+        self.node.get_logger().info("发送运动目标...")
         send_future = self.move_group_client.send_goal_async(goal)
         rclpy.spin_until_future_complete(self.node, send_future, timeout_sec=5.0)
 
         if send_future.result() is None:
-            self.node.get_logger().error('目标发送超时')
+            self.node.get_logger().error("目标发送超时")
             return None
 
         return send_future.result()
@@ -227,21 +224,23 @@ class ArmController:
         rclpy.spin_until_future_complete(self.node, get_result_future, timeout_sec=60.0)
 
         if get_result_future.result() is None:
-            self.node.get_logger().error('运动执行超时')
+            self.node.get_logger().error("运动执行超时")
             return False
 
         result = get_result_future.result()
         if result.result.error_code.val == 1:  # SUCCESS
-            self.node.get_logger().info('运动执行成功')
+            self.node.get_logger().info("运动执行成功")
             return True
 
-        self.node.get_logger().error(f'运动执行失败，错误码: {result.result.error_code.val}')
+        self.node.get_logger().error(
+            f"运动执行失败，错误码: {result.result.error_code.val}"
+        )
         return False
 
     def execute_calibration_poses(
         self,
         on_pose_reached: Callable[[int, list], None] | None = None,
-        stable_wait: float = 1.0
+        stable_wait: float = 1.0,
     ) -> int:
         """执行预定义的标定位姿序列。
 
@@ -257,7 +256,9 @@ class ArmController:
         success_count = 0
 
         for i, joints_deg in enumerate(CALIBRATION_POSES_DEG):
-            self.node.get_logger().info(f'移动到标定位姿 {i+1}/{len(CALIBRATION_POSES_DEG)}: {joints_deg}')
+            self.node.get_logger().info(
+                f"移动到标定位姿 {i + 1}/{len(CALIBRATION_POSES_DEG)}: {joints_deg}"
+            )
 
             if self.move_to_joints_deg(joints_deg, wait=True):
                 success_count += 1
@@ -266,6 +267,6 @@ class ArmController:
                 if on_pose_reached is not None:
                     on_pose_reached(i, joints_deg)
             else:
-                self.node.get_logger().warn(f'位姿 {i+1} 运动失败，跳过')
+                self.node.get_logger().warn(f"位姿 {i + 1} 运动失败，跳过")
 
         return success_count

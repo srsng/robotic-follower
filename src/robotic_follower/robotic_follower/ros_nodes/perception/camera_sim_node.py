@@ -190,7 +190,9 @@ class CameraSimNode(Node):
 
         # 发布点云
         try:
-            pc_msg = numpy_to_pointcloud2(self.points, frame_id=frame_id, stamp=now, pack_rgb=self.pack_rgb)
+            pc_msg = numpy_to_pointcloud2(
+                self.points, frame_id=frame_id, stamp=now, pack_rgb=self.pack_rgb
+            )
             self.pointcloud_pub.publish(pc_msg)
         except Exception as e:
             self.get_logger().error(f"发布点云失败: {e}")

@@ -45,6 +45,7 @@
         使用 RGB 图像给点云染色
 """
 
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
@@ -57,8 +58,6 @@ from robotic_follower.point_cloud.io.converters import (
     extract_camera_intrinsics_from_msg,
 )
 from robotic_follower.point_cloud.io.ros_converters import numpy_to_pointcloud2
-
-import numpy as np
 
 
 class PointCloudProcessorNode(Node):

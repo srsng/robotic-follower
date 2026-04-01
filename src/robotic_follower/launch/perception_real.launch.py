@@ -22,8 +22,8 @@ TF 说明：
 
 import os
 import tempfile
-import xacro
 
+import xacro
 from ament_index_python.packages import get_package_share_directory
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -39,7 +39,7 @@ def to_urdf(xacro_path, parameters=None):
     urdf_path = tempfile.mktemp(prefix="%s_" % os.path.basename(xacro_path))
     doc = xacro.process_file(xacro_path, mappings=parameters)
     out = xacro.open_output(urdf_path)
-    out.write(doc.toprettyxml(indent='  '))
+    out.write(doc.toprettyxml(indent="  "))
     return urdf_path
 
 
@@ -51,10 +51,13 @@ def generate_launch_description():
 
     # D435i URDF 路径（用于 robot_state_publisher 发布相机 TF）
     xacro_path = os.path.join(
-        get_package_share_directory('realsense2_description'),
-        'urdf', 'test_d435i_camera.urdf.xacro'
+        get_package_share_directory("realsense2_description"),
+        "urdf",
+        "test_d435i_camera.urdf.xacro",
     )
-    camera_urdf = to_urdf(xacro_path, {'use_nominal_extrinsics': 'true', 'add_plug': 'true'})
+    camera_urdf = to_urdf(
+        xacro_path, {"use_nominal_extrinsics": "true", "add_plug": "true"}
+    )
 
     # 1. RealSense 相机启动（启用原生点云）
     realsense_launch = IncludeLaunchDescription(
@@ -78,11 +81,11 @@ def generate_launch_description():
 
     # 1.5 robot_state_publisher 发布 D435i 相机 TF（world → camera_link 等）
     robot_state_publisher_node = Node(
-        name='camera_model_node',
-        package='robot_state_publisher',
-        executable='robot_state_publisher',
-        namespace='',
-        output='screen',
+        name="camera_model_node",
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        namespace="",
+        output="screen",
         arguments=[camera_urdf],
     )
 
@@ -103,9 +106,9 @@ def generate_launch_description():
 
     # 3. RViz 可视化（使用 perception_rviz.rviz，包含 MarkerArray 显示）
     rviz_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            FindPackageShare("robotic_follower"), "/launch/rviz_perception.launch.py"
-        ]),
+        PythonLaunchDescriptionSource(
+            [FindPackageShare("robotic_follower"), "/launch/rviz_perception.launch.py"]
+        ),
         launch_arguments={
             "rviz_config": "perception_rviz",
         }.items(),

@@ -9,6 +9,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+
 ROOT = Path(os.path.expanduser("~/ws/py/mmdetection3d/data2/sunrgbd"))
 bin_root = ROOT / "points"
 

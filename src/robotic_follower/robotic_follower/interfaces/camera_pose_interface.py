@@ -32,12 +32,12 @@ class CameraPoseInterface:
         self._marker_detected = False
 
         self.node.create_subscription(
-            'ros2_aruco_interfaces/msg/ArucoMarkers',
-            '/aruco_markers',
+            "ros2_aruco_interfaces/msg/ArucoMarkers",
+            "/aruco_markers",
             self._aruco_callback,
-            10
+            10,
         )
-        self.node.get_logger().info(f'CameraPoseInterface 已订阅 /aruco_markers')
+        self.node.get_logger().info("CameraPoseInterface 已订阅 /aruco_markers")
 
     def _aruco_callback(self, msg) -> None:
         """处理 ArUco 检测结果。
@@ -92,15 +92,20 @@ class CameraPoseInterface:
         matrix[1, 3] = pose.position.y
         matrix[2, 3] = pose.position.z
 
-        qx, qy, qz, qw = pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w
-        matrix[0, 0] = 1 - 2 * (qy ** 2 + qz ** 2)
+        qx, qy, qz, qw = (
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        )
+        matrix[0, 0] = 1 - 2 * (qy**2 + qz**2)
         matrix[1, 0] = 2 * (qx * qy - qz * qw)
         matrix[2, 0] = 2 * (qz * qx + qy * qw)
         matrix[0, 1] = 2 * (qx * qy + qz * qw)
-        matrix[1, 1] = 1 - 2 * (qx ** 2 + qz ** 2)
+        matrix[1, 1] = 1 - 2 * (qx**2 + qz**2)
         matrix[2, 1] = 2 * (qy * qz - qx * qw)
         matrix[0, 2] = 2 * (qz * qx - qy * qw)
         matrix[1, 2] = 2 * (qy * qz + qx * qw)
-        matrix[2, 2] = 1 - 2 * (qx ** 2 + qy ** 2)
+        matrix[2, 2] = 1 - 2 * (qx**2 + qy**2)
 
         return matrix

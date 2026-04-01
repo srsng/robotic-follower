@@ -102,7 +102,9 @@ class RVizVisualizerNode(Node):
         """点云回调：将 r,g,b 转换为 rgb 打包格式供 RViz 显示。"""
         # 检查是否有分开的 r, g, b 字段
         field_names = [f.name for f in msg.fields]
-        has_separate_rgb = "r" in field_names and "g" in field_names and "b" in field_names
+        has_separate_rgb = (
+            "r" in field_names and "g" in field_names and "b" in field_names
+        )
 
         if has_separate_rgb and msg.width > 0:
             # 转换为 rgb 打包格式

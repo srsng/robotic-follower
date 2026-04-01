@@ -21,13 +21,17 @@
 
 import os
 import tempfile
-import xacro
 
+import xacro
 from ament_index_python.packages import get_package_share_directory
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 
 from launch import LaunchDescription
@@ -38,30 +42,57 @@ def to_urdf(xacro_path, parameters=None):
     urdf_path = tempfile.mktemp(prefix="%s_" % os.path.basename(xacro_path))
     doc = xacro.process_file(xacro_path, mappings=parameters)
     out = xacro.open_output(urdf_path)
-    out.write(doc.toprettyxml(indent='  '))
+    out.write(doc.toprettyxml(indent="  "))
     return urdf_path
 
 
 def set_configurable_parameters(local_params):
-    return dict([(param['name'], LaunchConfiguration(param['name'])) for param in local_params])
+    return dict(
+        [(param["name"], LaunchConfiguration(param["name"])) for param in local_params]
+    )
 
 
 def declare_configurable_parameters(local_params):
-    return [DeclareLaunchArgument(param['name'], default_value=param['default'], description=param['description']) for param in local_params]
+    return [
+        DeclareLaunchArgument(
+            param["name"],
+            default_value=param["default"],
+            description=param["description"],
+        )
+        for param in local_params
+    ]
 
 
 local_parameters = [
-    {'name': 'bin_file', 'default': '', 'description': 'Path to the .bin point cloud file'},
-    {'name': 'sunrgbd_idx', 'default': '-1', 'description': 'SUNRGBD dataset sample index number (1 ~ 10335)'},
-    {'name': 'publish_rate', 'default': '1.0', 'description': 'Topic publishing rate (Hz)'},
-    {'name': 'gui', 'default': 'open3d', 'description': 'Visualizer GUI type: "open3d" or "rviz"'},
+    {
+        "name": "bin_file",
+        "default": "",
+        "description": "Path to the .bin point cloud file",
+    },
+    {
+        "name": "sunrgbd_idx",
+        "default": "-1",
+        "description": "SUNRGBD dataset sample index number (1 ~ 10335)",
+    },
+    {
+        "name": "publish_rate",
+        "default": "1.0",
+        "description": "Topic publishing rate (Hz)",
+    },
+    {
+        "name": "gui",
+        "default": "open3d",
+        "description": 'Visualizer GUI type: "open3d" or "rviz"',
+    },
 ]
 
 
 def get_visualizer_node(context, visualizer_type):
     """根据 visualizer_type 返回对应的可视化节点列表。"""
     viz_type = context.perform_substitution(visualizer_type)
-    assert viz_type in ("open3d", "rviz"), "only support open3d or rviz for Visualizer GUI"
+    assert viz_type in ("open3d", "rviz"), (
+        "only support open3d or rviz for Visualizer GUI"
+    )
 
     if viz_type == "open3d":
         return [
@@ -76,9 +107,12 @@ def get_visualizer_node(context, visualizer_type):
     # rviz: 感知数据转发 + RViz2 窗口
     return [
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource([
-                FindPackageShare("robotic_follower"), "/launch/rviz_perception.launch.py"
-            ]),
+            PythonLaunchDescriptionSource(
+                [
+                    FindPackageShare("robotic_follower"),
+                    "/launch/rviz_perception.launch.py",
+                ]
+            ),
             launch_arguments={
                 "rviz_config": "perception_rviz",
             }.items(),
@@ -98,28 +132,31 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
-                "bin_file": params['bin_file'],
-                "sunrgbd_idx": params['sunrgbd_idx'],
-                "publish_rate": params['publish_rate'],
-                "pack_rgb": str(params['gui']) == "rviz",
+                "bin_file": params["bin_file"],
+                "sunrgbd_idx": params["sunrgbd_idx"],
+                "publish_rate": params["publish_rate"],
+                "pack_rgb": str(params["gui"]) == "rviz",
             }
         ],
     )
 
     # 1.5 D435i URDF 路径（用于 robot_state_publisher 发布相机 TF）
     xacro_path = os.path.join(
-        get_package_share_directory('realsense2_description'),
-        'urdf', 'test_d435i_camera.urdf.xacro'
+        get_package_share_directory("realsense2_description"),
+        "urdf",
+        "test_d435i_camera.urdf.xacro",
     )
-    camera_urdf = to_urdf(xacro_path, {'use_nominal_extrinsics': 'true', 'add_plug': 'true'})
+    camera_urdf = to_urdf(
+        xacro_path, {"use_nominal_extrinsics": "true", "add_plug": "true"}
+    )
 
     # 1.6 robot_state_publisher 发布 D435i 相机 TF
     robot_state_publisher_node = Node(
-        name='camera_model_node',
-        package='robot_state_publisher',
-        executable='robot_state_publisher',
-        namespace='',
-        output='screen',
+        name="camera_model_node",
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        namespace="",
+        output="screen",
         arguments=[camera_urdf],
     )
 
@@ -137,13 +174,11 @@ def generate_launch_description():
     )
 
     # 4. 可视化节点
-    visualizer_node = OpaqueFunction(
-        function=get_visualizer_node, args=[params['gui']]
-    )
+    visualizer_node = OpaqueFunction(function=get_visualizer_node, args=[params["gui"]])
 
     return LaunchDescription(
-        declare_configurable_parameters(local_parameters) +
-        [
+        declare_configurable_parameters(local_parameters)
+        + [
             camera_sim_node,
             robot_state_publisher_node,
             detection_node,

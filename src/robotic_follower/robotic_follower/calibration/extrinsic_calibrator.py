@@ -20,8 +20,8 @@ Returns:
     error: 重投影误差
 """
 
-import numpy as np
 import cv2
+import numpy as np
 from scipy.spatial.transform import Rotation
 
 
@@ -120,7 +120,9 @@ def calibrate_handeye(
 
     # 执行标定
     if method not in HAND_EYE_METHODS:
-        raise ValueError(f"未知标定方法: {method}，可用: {list(HAND_EYE_METHODS.keys())}")
+        raise ValueError(
+            f"未知标定方法: {method}，可用: {list(HAND_EYE_METHODS.keys())}"
+        )
 
     method_id = HAND_EYE_METHODS[method]
 
@@ -192,7 +194,6 @@ def compute_calibration_error(
         # 但我们没有 base2marker，所以我们用第一个样本作为参考
 
         # 简化误差计算：比较相邻位姿之间的相对变换
-        pass
 
     # 使用另一种误差计算方式：
     # 计算所有样本的重投影误差
@@ -217,9 +218,7 @@ def compute_calibration_error(
         predicted_marker2camera = gripper2camera @ marker2gripper
 
         # 计算误差（平移部分）
-        t_error = np.linalg.norm(
-            marker2camera[:3, 3] - predicted_marker2camera[:3, 3]
-        )
+        t_error = np.linalg.norm(marker2camera[:3, 3] - predicted_marker2camera[:3, 3])
         total_error += t_error
 
     return total_error / len(robot_poses)
@@ -244,7 +243,7 @@ def find_best_calibration_method(
     """
     results = {}
 
-    for method_name in HAND_EYE_METHODS.keys():
+    for method_name in HAND_EYE_METHODS:
         try:
             R, t, q, error = calibrate_handeye(robot_poses, camera_poses, method_name)
             results[method_name] = {
@@ -286,9 +285,7 @@ class ExtrinsicCalibrator:
         self.robot_poses: list[np.ndarray] = []
         self.camera_poses: list[np.ndarray] = []
 
-    def add_sample(
-        self, robot_pose: np.ndarray, camera_pose: np.ndarray
-    ) -> bool:
+    def add_sample(self, robot_pose: np.ndarray, camera_pose: np.ndarray) -> bool:
         """添加一个样本。
 
         Args:

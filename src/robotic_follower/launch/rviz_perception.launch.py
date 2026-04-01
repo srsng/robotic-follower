@@ -30,9 +30,11 @@
 """
 
 import os
+
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
 from launch import LaunchDescription
 
 
@@ -49,26 +51,28 @@ def get_rviz_config_path(rviz_config_name: str) -> str:
         pass
 
     # fallback
-    return os.path.expanduser(f"~/ros2_ws/install/robotic_follower/share/robotic_follower/rviz/{rviz_config_name}.rviz")
+    return os.path.expanduser(
+        f"~/ros2_ws/install/robotic_follower/share/robotic_follower/rviz/{rviz_config_name}.rviz"
+    )
 
 
 def generate_launch_description():
     """生成 Launch 描述。"""
-    return LaunchDescription([
-        DeclareLaunchArgument(
-            "rviz_config",
-            default_value="default",
-            description="RViz 配置文件名（不含 .rviz 后缀）",
-        ),
-        OpaqueFunction(function=launch_rviz_nodes),
-    ])
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument(
+                "rviz_config",
+                default_value="default",
+                description="RViz 配置文件名（不含 .rviz 后缀）",
+            ),
+            OpaqueFunction(function=launch_rviz_nodes),
+        ]
+    )
 
 
 def launch_rviz_nodes(context):
     """启动 RViz 节点。"""
-    rviz_config_name = context.perform_substitution(
-        LaunchConfiguration("rviz_config")
-    )
+    rviz_config_name = context.perform_substitution(LaunchConfiguration("rviz_config"))
     rviz_config = get_rviz_config_path(rviz_config_name)
 
     nodes = []

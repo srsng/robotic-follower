@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import threading
 from typing import TYPE_CHECKING
 
-import rclpy
-from rclpy.node import Node
 import std_msgs.msg
 import std_srvs.srv
+from rclpy.node import Node
+
 
 if TYPE_CHECKING:
     import open3d.visualization.gui as gui
@@ -18,7 +17,7 @@ if TYPE_CHECKING:
 class CalibrationUIPanel:
     """标定控制面板。"""
 
-    def __init__(self, parent_window: "gui.Window", em: float, node: Node):
+    def __init__(self, parent_window: gui.Window, em: float, node: Node):
         """初始化标定面板。
 
         Args:
@@ -182,7 +181,9 @@ class CalibrationUIPanel:
         def handle_response(f):
             try:
                 response = f.result()
-                msg = response.message if hasattr(response, "message") else str(response)
+                msg = (
+                    response.message if hasattr(response, "message") else str(response)
+                )
                 self.node.get_logger().info(f"{service_name}: {msg}")
             except Exception as e:
                 self.node.get_logger().error(f"服务调用失败: {e}")
@@ -248,10 +249,12 @@ class CalibrationUIPanel:
         max_samples = status_data.get("max_samples", 50)
 
         self.status_label.text = self._calibration_state.capitalize()
-        self.sample_count_label.text = f"{self._sample_count} / {self._min_samples} (min)"
+        self.sample_count_label.text = (
+            f"{self._sample_count} / {self._min_samples} (min)"
+        )
 
         # 更新按钮状态
-        self._is_sampling = (self._calibration_state == "sampling")
+        self._is_sampling = self._calibration_state == "sampling"
         self.start_stop_btn.text = (
             "Stop Sampling" if self._is_sampling else "Start Sampling"
         )

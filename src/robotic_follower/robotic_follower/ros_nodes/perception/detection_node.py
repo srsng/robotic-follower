@@ -159,7 +159,9 @@ class DetectionNode(Node):
 
         try:
             points = pointcloud2_to_numpy(msg)
-            self.get_logger().debug(f"收到点云: shape={points.shape}, dtype={points.dtype}")
+            self.get_logger().debug(
+                f"收到点云: shape={points.shape}, dtype={points.dtype}"
+            )
 
             # 只取 XYZ（忽略 RGB），mmdet3d VoteNet 只接受 3 通道输入
             if points.shape[1] > 3:
@@ -191,7 +193,9 @@ class DetectionNode(Node):
             bbox = det["bbox"]
             # 修复：mmdet3d 中 SUNRGBD 数据集的 z 坐标是底部中心，而 ROS2 Detection3D 和 Open3D 期望几何中心
             # 因此需要将 z 加上高度的一半 (dz / 2)
-            detection.bbox.center.position = Point(x=bbox[0], y=bbox[1], z=bbox[2] + bbox[5] / 2.0)
+            detection.bbox.center.position = Point(
+                x=bbox[0], y=bbox[1], z=bbox[2] + bbox[5] / 2.0
+            )
             detection.bbox.size = Vector3(x=bbox[3], y=bbox[4], z=bbox[5])
             detection.bbox.center.orientation = self._yaw_to_quaternion(bbox[6])
 

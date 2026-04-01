@@ -25,8 +25,8 @@ TF 关系：
 import geometry_msgs.msg
 import rclpy
 import std_srvs.srv
-from rclpy.node import Node
 from rcl_interfaces.msg import SetParametersResult
+from rclpy.node import Node
 from tf2_ros import TransformBroadcaster
 
 
@@ -118,9 +118,7 @@ class TFPublisherNode(Node):
                 self.current_transform.transform.translation.z = t[2]
 
             # 读取旋转（四元数）
-            rotation_param = self.get_parameter(
-                f"{self.config_namespace}.rotation"
-            )
+            rotation_param = self.get_parameter(f"{self.config_namespace}.rotation")
             if rotation_param.type == rclpy.Parameter.Type.DOUBLE_ARRAY:
                 q = rotation_param.value
                 self.current_transform.transform.rotation.x = q[0]

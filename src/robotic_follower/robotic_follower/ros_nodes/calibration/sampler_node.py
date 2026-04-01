@@ -38,7 +38,6 @@
 """
 
 import json
-import math
 import time
 
 import numpy as np
@@ -46,13 +45,12 @@ import rclpy
 import std_msgs.msg
 import std_srvs.srv
 from rclpy.node import Node
-from ros2_aruco_interfaces.msg import ArucoMarkers
 
 from robotic_follower.interfaces import (
-    RobotPoseInterface,
-    CameraPoseInterface,
-    ArmController,
     CALIBRATION_POSES_DEG,
+    ArmController,
+    CameraPoseInterface,
+    RobotPoseInterface,
 )
 
 
@@ -192,6 +190,7 @@ class CalibrationSamplerNode(Node):
 
         # 在新线程中执行采集
         import threading
+
         thread = threading.Thread(target=self._calibration_loop)
         thread.daemon = True
         thread.start()
@@ -238,26 +237,30 @@ class CalibrationSamplerNode(Node):
 
         # 执行位姿序列
         success_count = self.arm_controller.execute_calibration_poses(
-            on_pose_reached=on_pose_reached,
-            stable_wait=self.stable_wait
+            on_pose_reached=on_pose_reached, stable_wait=self.stable_wait
         )
 
-        self.get_logger().info(f"标定位姿序列执行完成，成功 {success_count}/{len(CALIBRATION_POSES_DEG)}")
+        self.get_logger().info(
+            f"标定位姿序列执行完成，成功 {success_count}/{len(CALIBRATION_POSES_DEG)}"
+        )
 
         # 检查是否需要重复采集
         if self.sample_count < self.min_samples and self.state == "collecting":
-            self.get_logger().info(f"样本不足 ({self.sample_count}/{self.min_samples})，重复采集...")
+            self.get_logger().info(
+                f"样本不足 ({self.sample_count}/{self.min_samples})，重复采集..."
+            )
             time.sleep(2.0)
             self.arm_controller.execute_calibration_poses(
-                on_pose_reached=on_pose_reached,
-                stable_wait=self.stable_wait
+                on_pose_reached=on_pose_reached, stable_wait=self.stable_wait
             )
 
         # 采集完成
         if self.sample_count >= self.min_samples:
             self._trigger_calibration()
         else:
-            self.get_logger().warn(f"样本仍不足 ({self.sample_count}/{self.min_samples})，标定终止")
+            self.get_logger().warn(
+                f"样本仍不足 ({self.sample_count}/{self.min_samples})，标定终止"
+            )
             self.state = "idle"
 
     def _try_add_sample(self) -> bool:
@@ -280,9 +283,13 @@ class CalibrationSamplerNode(Node):
 
         # 检查位姿变化
         if self.last_valid_robot_pose is not None:
-            pos_diff = np.linalg.norm(robot_pose_matrix[:3, 3] - self.last_valid_robot_pose[:3, 3])
+            pos_diff = np.linalg.norm(
+                robot_pose_matrix[:3, 3] - self.last_valid_robot_pose[:3, 3]
+            )
             if pos_diff < self.position_threshold:
-                self.get_logger().warn(f"位置变化不足: {pos_diff:.3f}m < {self.position_threshold}m")
+                self.get_logger().warn(
+                    f"位置变化不足: {pos_diff:.3f}m < {self.position_threshold}m"
+                )
                 return False
 
         # 添加样本
@@ -311,6 +318,7 @@ class CalibrationSamplerNode(Node):
 
         # 通过服务调用 calculator_node 执行标定
         from std_srvs.srv import Trigger
+
         request = Trigger.Request()
         future = self.execute_client.call_async(request)
         # 注意：这里不等待结果，因为 calculator_node 会通过 /calibration_result 话题发布结果

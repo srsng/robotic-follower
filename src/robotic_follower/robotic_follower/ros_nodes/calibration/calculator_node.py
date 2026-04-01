@@ -146,7 +146,9 @@ class CalibrationCalculatorNode(Node):
 
         if self.calibrator.sample_count < self.min_samples:
             response.success = False
-            response.message = f"样本不足: {self.calibrator.sample_count}/{self.min_samples}"
+            response.message = (
+                f"样本不足: {self.calibrator.sample_count}/{self.min_samples}"
+            )
             self.get_logger().warn(response.message)
             self.state = "idle"
             return response
