@@ -81,7 +81,7 @@ sudo udevadm trigger
 | `/camera/depth/image_rect_raw`             | `sensor_msgs/Image`            | realsense2_camera    |
 | `/camera/aligned_depth_to_color/image_raw` | `sensor_msgs/Image`            | realsense2_camera    |
 | `/camera/color/camera_info`                | `sensor_msgs/CameraInfo`       | realsense2_camera    |
-| `/perception/processed_pointcloud`         | `sensor_msgs/PointCloud2`      | perception           |
+| `/camera/camera/depth/color/points`        | `sensor_msgs/PointCloud2`      | perception           |
 | `/perception/detections`                   | `vision_msgs/Detection3DArray` | perception           |
 | `/joint_states`                            | `sensor_msgs/JointState`       | dummy_arm_controller |
 

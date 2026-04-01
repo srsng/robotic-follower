@@ -121,7 +121,7 @@ graph TD
 | `/camera/depth/image_raw`                  | `sensor_msgs/Image`            | RealSenseNode             | -                      |
 | `/camera/aligned_depth_to_color/image_raw` | `sensor_msgs/Image`            | RealSenseNode             | PointCloudProc, RViz   |
 | `/camera/color/camera_info`                | `sensor_msgs/CameraInfo`       | RealSenseNode             | PointCloudProc, Open3D |
-| `/perception/processed_pointcloud`         | `sensor_msgs/PointCloud2`      | PointCloudProc, CameraSim | RViz, Open3D           |
+| `/camera/camera/depth/color/points`        | `sensor_msgs/PointCloud2`      | PointCloudProc, CameraSim | RViz, Open3D           |
 | `/perception/detections`                   | `vision_msgs/Detection3DArray` | DetectionNode             | RViz, Open3D, Planning |
 
 ### 标定相关话题
@@ -204,7 +204,7 @@ world (世界坐标系)
 | `/camera/depth/image_raw`                  | `sensor_msgs/Image`            | RealSenseNode             | -                      | 原始深度图           |
 | `/camera/aligned_depth_to_color/image_raw` | `sensor_msgs/Image`            | RealSenseNode             | PointCloudProc, RViz   | 对齐到彩色图的深度图 |
 | `/camera/color/camera_info`                | `sensor_msgs/CameraInfo`       | RealSenseNode             | PointCloudProc, Open3D | 相机内参信息         |
-| `/perception/processed_pointcloud`         | `sensor_msgs/PointCloud2`      | PointCloudProc, CameraSim | RViz, Open3D           | 处理后的点云         |
+| `/camera/camera/depth/color/points`        | `sensor_msgs/PointCloud2`      | PointCloudProc, CameraSim | RViz, Open3D           | 处理后的点云         |
 | `/perception/detections`                   | `vision_msgs/Detection3DArray` | DetectionNode             | RViz, Open3D, Planning | 3D 目标检测结果      |
 
 ### 标定相关话题

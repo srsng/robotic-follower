@@ -26,12 +26,11 @@
 
 ### 常用启动参数
 
-| 参数            | 类型   | 默认值  | 说明                            |
-| --------------- | ------ | ------- | ------------------------------- |
-| `use_sim_time`  | bool   | `false` | 使用仿真时间                    |
-| `bin_file`      | string | -       | .bin 点云文件路径（sim 测试用） |
-| `sunrgbd_idx`   | int    | -1      | SUNRGBD 样本索引（sim 测试用）  |
-| `run_detection` | bool   | `true`  | 是否运行 3D 检测                |
+| 参数           | 类型   | 默认值  | 说明                            |
+| -------------- | ------ | ------- | ------------------------------- |
+| `use_sim_time` | bool   | `false` | 使用仿真时间                    |
+| `bin_file`     | string | -       | .bin 点云文件路径（sim 测试用） |
+| `sunrgbd_idx`  | int    | -1      | SUNRGBD 样本索引（sim 测试用）  |
 
 ---
 
@@ -94,7 +93,7 @@ ros2 launch robotic_follower perception_real.launch.py
 ```
 
 **预期输出**:
-- `/perception/processed_pointcloud` - 处理后点云
+- `/camera/camera/depth/color/points` - 处理后点云
 - `/perception/detections` - 3D 检测结果
 - `/perception/pointcloud_display` - RViz 显示点云
 - `/perception/detection_markers` - RViz 检测框
@@ -117,11 +116,10 @@ ros2 launch robotic_follower perception_real.launch.py
 - SUNRGBD 数据集验证
 
 **启动参数**:
-| 参数            | 类型   | 默认值 | 说明              |
-| --------------- | ------ | ------ | ----------------- |
-| `bin_file`      | string | -      | .bin 点云文件路径 |
-| `sunrgbd_idx`   | int    | -1     | SUNRGBD 样本索引  |
-| `run_detection` | bool   | `true` | 是否运行检测      |
+| 参数          | 类型   | 默认值 | 说明              |
+| ------------- | ------ | ------ | ----------------- |
+| `bin_file`    | string | -      | .bin 点云文件路径 |
+| `sunrgbd_idx` | int    | -1     | SUNRGBD 样本索引  |
 
 **启动命令**:
 ```bash
@@ -132,10 +130,6 @@ ros2 launch robotic_follower perception_sim.launch.py \
 # 使用 SUNRGBD 索引
 ros2 launch robotic_follower perception_sim.launch.py \
   sunrgbd_idx:=0
-
-# 仅点云处理，不运行检测
-ros2 launch robotic_follower perception_sim.launch.py \
-  bin_file:=/path/to/data.bin run_detection:=false
 ```
 
 ---

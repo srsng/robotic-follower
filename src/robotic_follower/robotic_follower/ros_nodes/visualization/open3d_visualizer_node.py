@@ -14,8 +14,8 @@
     - 坐标系参考系显示
 
 订阅话题：
-    - /perception/processed_pointcloud (sensor_msgs/PointCloud2)
-        处理后的点云数据
+    - /camera/camera/depth/color/points (sensor_msgs/PointCloud2)
+        处理后的点云数据（与实机 realsense2_camera 保持一致）
     - /perception/detections (vision_msgs/Detection3DArray)
         3D 目标检测结果
     - /camera/color/image_raw (sensor_msgs/Image)
@@ -70,7 +70,7 @@ class Open3DVisualizerNode(Node):
 
         # 订阅话题
         self.pc_sub = self.create_subscription(
-            PointCloud2, "/perception/processed_pointcloud", self.pc_callback, 10
+            PointCloud2, "/camera/camera/depth/color/points", self.pc_callback, 10
         )
         self.det_sub = self.create_subscription(
             Detection3DArray, "/perception/detections", self.det_callback, 10

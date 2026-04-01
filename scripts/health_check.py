@@ -20,7 +20,7 @@ class HealthChecker(Node):
             '/camera/depth/image_rect_raw',
             '/camera/color/camera_info',
             '/perception/detections',
-            '/perception/processed_pointcloud',
+            '/camera/camera/depth/color/points',
             '/joint_states',
         ]
 

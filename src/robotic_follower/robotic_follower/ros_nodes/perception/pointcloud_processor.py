@@ -19,7 +19,7 @@
         RGB 彩色图像（用于点云染色，可选）
 
 发布话题：
-    - /perception/processed_pointcloud (sensor_msgs/PointCloud2)
+    - /camera/camera/depth/color/points (sensor_msgs/PointCloud2)
         处理后的点云（XYZ 或 XYZRGB 格式）
 
 参数：
@@ -129,7 +129,7 @@ class PointCloudProcessorNode(Node):
 
         # 发布话题
         self.pointcloud_pub = self.create_publisher(
-            PointCloud2, "/perception/processed_pointcloud", 10
+            PointCloud2, "/camera/camera/depth/color/points", 10
         )
 
         self.get_logger().info("点云处理器节点已启动")

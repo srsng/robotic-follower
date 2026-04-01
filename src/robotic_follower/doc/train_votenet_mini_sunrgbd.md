@@ -11,32 +11,32 @@
 ### 1.1 数据统计
 
 | 数据集 | 总样本 | 正样本 | 负样本 |
-|--------|--------|--------|--------|
-| 训练集 | 194 | 169 | 25 |
-| 验证集 | 132 | 115 | 17 |
+| ------ | ------ | ------ | ------ |
+| 训练集 | 194    | 169    | 25     |
+| 验证集 | 132    | 115    | 17     |
 
 ### 1.2 类别映射
 
-| ID | 类别名 | 训练集实例数 |
-|----|--------|-------------|
-| 0 | keyboard | 29 |
-| 1 | laptop | 26 |
-| 2 | book | 33 |
-| 3 | cup | 51 |
-| 4 | mug | 36 |
-| 5 | pen | 22 |
-| 6 | notebook | 18 |
-| 7 | phone | 12 |
+| ID  | 类别名   | 训练集实例数 |
+| --- | -------- | ------------ |
+| 0   | keyboard | 29           |
+| 1   | laptop   | 26           |
+| 2   | book     | 33           |
+| 3   | cup      | 51           |
+| 4   | mug      | 36           |
+| 5   | pen      | 22           |
+| 6   | notebook | 18           |
+| 7   | phone    | 12           |
 
 ### 1.3 数据路径
 
-| 文件 | 路径 |
-|------|------|
+| 文件       | 路径                                                                    |
+| ---------- | ----------------------------------------------------------------------- |
 | 训练集 pkl | `~/ws/py/mmdetection3d/data2/mini_sunrgbd/mini_sunrgbd_infos_train.pkl` |
-| 验证集 pkl | `~/ws/py/mmdetection3d/data2/mini_sunrgbd/mini_sunrgbd_infos_val.pkl` |
-| 点云文件 | `~/ws/py/mmdetection3d/data2/mini_sunrgbd/points/*.bin` |
-| 训练配置 | `~/ws/py/mmdetection3d/configs/votenet_mini_sunrgbd.py` |
-| 数据集配置 | `~/ws/py/mmdetection3d/configs/_base_/datasets/mini_sunrgbd_3d.py` |
+| 验证集 pkl | `~/ws/py/mmdetection3d/data2/mini_sunrgbd/mini_sunrgbd_infos_val.pkl`   |
+| 点云文件   | `~/ws/py/mmdetection3d/data2/mini_sunrgbd/points/*.bin`                 |
+| 训练配置   | `~/ws/py/mmdetection3d/configs/votenet_mini_sunrgbd.py`                 |
+| 数据集配置 | `~/ws/py/mmdetection3d/configs/_base_/datasets/mini_sunrgbd_3d.py`      |
 
 ---
 
@@ -62,14 +62,14 @@ python tools/train.py configs/votenet_mini_sunrgbd.py --resume work_dirs/votenet
 
 ### 2.3 训练参数
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| max_epochs | 36 | 训练轮数 |
-| lr | 0.008 (auto-scaled to ~6.25e-07 with batch_size=1) | 初始学习率 |
-| optimizer | AdamW | 优化器 |
-| weight_decay | 0.01 | 权重衰减 |
-| batch_size | 1 | 批次大小（受 GPU 内存限制） |
-| val_interval | 1 | 每 1 epoch 验证 |
+| 参数         | 默认值                                             | 说明                        |
+| ------------ | -------------------------------------------------- | --------------------------- |
+| max_epochs   | 36                                                 | 训练轮数                    |
+| lr           | 0.008 (auto-scaled to ~6.25e-07 with batch_size=1) | 初始学习率                  |
+| optimizer    | AdamW                                              | 优化器                      |
+| weight_decay | 0.01                                               | 权重衰减                    |
+| batch_size   | 1                                                  | 批次大小（受 GPU 内存限制） |
+| val_interval | 1                                                  | 每 1 epoch 验证             |
 
 ### 2.4 训练输出
 
@@ -149,7 +149,7 @@ ros2 run robotic_follower detection_node
 ### 4.3 检测节点接口
 
 **订阅话题**:
-- `/perception/processed_pointcloud` (sensor_msgs/PointCloud2) - 处理后的点云
+- `/camera/camera/depth/color/points` (sensor_msgs/PointCloud2) - 处理后的点云
 
 **发布话题**:
 - `/perception/detections` (vision_msgs/Detection3DArray) - 3D 检测结果
@@ -191,16 +191,16 @@ detections = detector.detect(points)
 
 ## 五、类别 ID 对照表
 
-| ID | 类别名 | 英文名 |
-|----|--------|--------|
-| 0 | 键盘 | keyboard |
-| 1 | 笔记本 | laptop |
-| 2 | 书籍 | book |
-| 3 | 水杯 | cup |
-| 4 | 马克杯 | mug |
-| 5 | 笔 | pen |
-| 6 | 笔记本(纸) | notebook |
-| 7 | 手机 | phone |
+| ID  | 类别名     | 英文名   |
+| --- | ---------- | -------- |
+| 0   | 键盘       | keyboard |
+| 1   | 笔记本     | laptop   |
+| 2   | 书籍       | book     |
+| 3   | 水杯       | cup      |
+| 4   | 马克杯     | mug      |
+| 5   | 笔         | pen      |
+| 6   | 笔记本(纸) | notebook |
+| 7   | 手机       | phone    |
 
 ---
 

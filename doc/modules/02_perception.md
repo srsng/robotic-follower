@@ -183,10 +183,10 @@ L_total = α * L_vote + β * L_objectness + γ * L_class + δ * L_bbox
 
 ### 发布话题
 
-| 话题名称                          | 消息类型                       | 说明       |
-| --------------------------------- | ------------------------------ | ---------- |
-| `/perception/processed_pointcloud` | `sensor_msgs/PointCloud2`      | 处理后点云 |
-| `/perception/detections`           | `vision_msgs/Detection3DArray` | 3D检测结果 |
+| 话题名称                            | 消息类型                       | 说明       |
+| ----------------------------------- | ------------------------------ | ---------- |
+| `/camera/camera/depth/color/points` | `sensor_msgs/PointCloud2`      | 处理后点云 |
+| `/perception/detections`            | `vision_msgs/Detection3DArray` | 3D检测结果 |
 
 ## 目录结构
 
@@ -399,7 +399,7 @@ class MMDet3DPerceptionNode(Node):
 
         # 发布话题
         self.pointcloud_pub = self.create_publisher(
-            PointCloud2, '/perception/processed_pointcloud', QoSProfile(depth=5))
+            PointCloud2, '/camera/camera/depth/color/points', QoSProfile(depth=5))
         self.detections_pub = self.create_publisher(
             Detection3DArray, '/perception/detections', QoSProfile(depth=5))
 

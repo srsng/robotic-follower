@@ -10,7 +10,7 @@
     - 从配置文件加载检测器参数
 
 订阅话题：
-    - /perception/processed_pointcloud (sensor_msgs/PointCloud2)
+    - /camera/camera/depth/color/points (sensor_msgs/PointCloud2)
         处理后的点云数据
 
 发布话题：
@@ -88,7 +88,7 @@ class DetectionNode(Node):
             self.get_logger().error(f"配置文件不存在: {config_file}")
 
         # 订阅话题
-        self.declare_parameter("pointcloud_topic", "/perception/processed_pointcloud")
+        self.declare_parameter("pointcloud_topic", "/camera/camera/depth/color/points")
         pointcloud_topic = str(self.get_parameter("pointcloud_topic").value)
         self.pointcloud_sub = self.create_subscription(
             PointCloud2,

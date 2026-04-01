@@ -17,8 +17,8 @@
         RGB 彩色图像
     - /camera/color/camera_info (sensor_msgs/CameraInfo)
         相机内参信息（用于可视化）
-    - /perception/processed_pointcloud (sensor_msgs/PointCloud2)
-        处理后的点云数据（XYZRGB 格式）
+    - /camera/camera/depth/color/points (sensor_msgs/PointCloud2)
+        处理后的点云数据（XYZRGB 格式，与实机 realsense2_camera 保持一致）
 
 参数：
     - bin_file (string, 默认 "")
@@ -69,9 +69,9 @@ class CameraSimNode(Node):
         self.camera_intrinsic = None
         self.is_data_loaded = False
 
-        # 发布话题
+        # 发布话题（与实机 realsense2_camera 保持一致）
         self.pointcloud_pub = self.create_publisher(
-            PointCloud2, "/perception/processed_pointcloud", 10
+            PointCloud2, "/camera/camera/depth/color/points", 10
         )
         self.image_pub = self.create_publisher(Image, "/camera/color/image_raw", 10)
         self.camera_info_pub = self.create_publisher(

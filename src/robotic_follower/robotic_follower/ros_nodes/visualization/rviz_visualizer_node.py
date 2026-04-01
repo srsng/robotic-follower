@@ -12,7 +12,7 @@
     - RGB 图像转发（话题分流）
 
 订阅话题：
-    - /perception/processed_pointcloud (sensor_msgs/PointCloud2)
+    - /camera/camera/depth/color/points (sensor_msgs/PointCloud2)
         处理后的点云数据
     - /perception/detections (vision_msgs/Detection3DArray)
         3D 目标检测结果
@@ -68,7 +68,7 @@ class RVizVisualizerNode(Node):
         # ========== 点云转发 ==========
         self.pc_sub = self.create_subscription(
             PointCloud2,
-            "/perception/processed_pointcloud",
+            "/camera/camera/depth/color/points",
             self.pointcloud_callback,
             10,
         )
