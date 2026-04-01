@@ -53,10 +53,6 @@ setup(
             "calibration_calculator=robotic_follower.ros_nodes.calibration.calculator_node:main",
             "calibration_result_manager=robotic_follower.ros_nodes.calibration.result_manager_node:main",
             "calibration_tf_publisher=robotic_follower.ros_nodes.calibration.tf_publisher_node:main",
-            # === 机器人节点 ===
-            "arm_control=robotic_follower.ros_nodes.robot.control_node:main",
-            "motion_planning=robotic_follower.ros_nodes.robot.planning_node:main",
-            "joint_state_remapper=robotic_follower.ros_nodes.robot.joint_state_remapper_node:main",
         ],
     },
 )
