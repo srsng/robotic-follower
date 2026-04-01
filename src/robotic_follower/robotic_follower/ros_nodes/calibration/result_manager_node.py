@@ -98,8 +98,32 @@ class CalibrationResultManagerNode(Node):
         self.declare_parameter("hand_eye_calibration.error", 0.0)
         self.declare_parameter("hand_eye_calibration.status", "idle")
         self.declare_parameter("hand_eye_calibration.sample_count", 0)
+        self.declare_parameter("hand_eye_calibration.translation", [0.0, 0.0, 0.0])
+        self.declare_parameter("hand_eye_calibration.rotation", [0.0, 0.0, 0.0, 1.0])
+
+        # 订阅标定结果
+        self.result_sub = self.create_subscription(
+            String,
+            "/hand_eye_calibration/calibration_result",
+            self.result_callback,
+            10,
+        )
+
+        # 状态发布定时器
+        self.status_timer = self.create_timer(1.0, self.publish_status)
 
         self.get_logger().info("结果管理节点已启动")
+
+    def publish_status(self):
+        """发布状态。"""
+        status = {
+            "node": "result_manager",
+            "state": "idle" if self.current_result is None else "completed",
+            "has_result": self.current_result is not None,
+        }
+        msg = String()
+        msg.data = json.dumps(status)
+        self.status_pub.publish(msg)
 
     def result_callback(self, msg: String):
         """处理标定结果。"""
@@ -157,6 +181,22 @@ class CalibrationResultManagerNode(Node):
                 "hand_eye_calibration.sample_count",
                 rclpy.Parameter.Type.INTEGER,
                 data.get("sample_count", 0),
+            )
+        )
+        # 设置平移参数
+        self.set_parameter(
+            rclpy.parameter.Parameter(
+                "hand_eye_calibration.translation",
+                rclpy.Parameter.Type.DOUBLE_ARRAY,
+                t.flatten().tolist(),
+            )
+        )
+        # 设置旋转参数（四元数）
+        self.set_parameter(
+            rclpy.parameter.Parameter(
+                "hand_eye_calibration.rotation",
+                rclpy.Parameter.Type.DOUBLE_ARRAY,
+                quat.tolist(),
             )
         )
 

@@ -6,7 +6,7 @@
 
 订阅话题：
     - /hand_eye_calibration/calibration_sample (std_msgs/String)
-        JSON 格式的标定样本数据
+        JSON 格式的标定样本数据，包含 robot_pose 和 camera_pose
 
 发布话题：
     - /hand_eye_calibration/calibration_result (std_msgs/String)
@@ -25,8 +25,8 @@
         最少样本数
     - max_samples (int, 默认: 50)
         最大样本数
-    - method (str, 默认: "auto")
-        标定方法："auto" 自动选择最佳方法，或指定 Tsai/Horaud/Park/Andreff/Daniiidis
+    - method (str, 默认: "BEST")
+        标定方法："BEST" 自动选择最佳方法，或指定 TSAI/PARK/HORAUD/ANDREFF/DANIILIDIS
 """
 
 import json
@@ -49,17 +49,20 @@ class CalibrationCalculatorNode(Node):
         # 参数
         self.declare_parameter("min_samples", 15)
         self.declare_parameter("max_samples", 50)
-        self.declare_parameter("method", "auto")
+        self.declare_parameter("method", "BEST")
 
         self.min_samples = self.get_parameter("min_samples").value
         self.max_samples = self.get_parameter("max_samples").value
         self.method = self.get_parameter("method").value
 
         # 标定器
-        self.calibrator = ExtrinsicCalibrator()
+        self.calibrator = ExtrinsicCalibrator(min_samples=self.min_samples)
 
         # 样本存储
         self.samples: list[dict] = []
+
+        # 当前状态
+        self.state = "idle"  # idle, collecting, calibrating, completed, failed
 
         # 订阅
         self.sample_sub = self.create_subscription(
@@ -82,8 +85,6 @@ class CalibrationCalculatorNode(Node):
         )
 
         # 服务
-        # from robotic_follower.srv import ExecuteCalibration, ResetCalibration
-
         self.execute_srv = self.create_service(
             std_srvs.srv.Trigger,
             "/hand_eye_calibration/execute",
@@ -104,10 +105,36 @@ class CalibrationCalculatorNode(Node):
         """处理标定样本。"""
         try:
             data = json.loads(msg.data)
-            self.samples.append(data)
-            self.get_logger().info(f"收到样本 #{len(self.samples)}")
+            sample = data.get("sample")
+            if sample is None:
+                self.get_logger().warn("样本消息中缺少 'sample' 字段")
+                return
+
+            robot_pose = sample.get("robot_pose")
+            camera_pose = sample.get("camera_pose")
+
+            if robot_pose is None or camera_pose is None:
+                self.get_logger().warn("样本缺少 robot_pose 或 camera_pose")
+                return
+
+            # 转换为 numpy 数组
+            robot_pose_np = np.array(robot_pose)
+            camera_pose_np = np.array(camera_pose)
+
+            # 添加到标定器
+            if self.calibrator.add_sample(robot_pose_np, camera_pose_np):
+                self.samples.append(sample)
+                self.get_logger().info(
+                    f"收到样本 #{self.calibrator.sample_count}, "
+                    f"误差阈值检查: {self.calibrator.sample_count >= self.min_samples}"
+                )
+            else:
+                self.get_logger().warn("样本添加失败")
+
         except json.JSONDecodeError as e:
             self.get_logger().error(f"样本 JSON 解析失败: {e}")
+        except Exception as e:
+            self.get_logger().error(f"处理样本时出错: {e}")
 
     def execute_callback(
         self,
@@ -115,65 +142,60 @@ class CalibrationCalculatorNode(Node):
         response: std_srvs.srv.Trigger.Response,
     ) -> std_srvs.srv.Trigger.Response:
         """执行标定计算。"""
+        self.state = "calibrating"
 
-        if len(self.samples) < self.min_samples:
+        if self.calibrator.sample_count < self.min_samples:
             response.success = False
-            response.error = 0.0
-            response.message = f"样本不足: {len(self.samples)}/{self.min_samples}"
+            response.message = f"样本不足: {self.calibrator.sample_count}/{self.min_samples}"
             self.get_logger().warn(response.message)
+            self.state = "idle"
             return response
 
         try:
-            # 提取位姿
-            robot_poses = [
-                np.array(s["robot_pose"]) for s in self.samples if s.get("robot_pose")
-            ]
-            camera_poses = [
-                np.array(s["camera_pose"]) for s in self.samples if s.get("camera_pose")
-            ]
-
-            if len(robot_poses) != len(camera_poses):
-                response.success = False
-                response.error = 0.0
-                response.message = "机械臂位姿和相机位姿数量不一致"
-                return response
-
             # 执行标定
             self.get_logger().info("开始标定计算...")
-            result = self.calibrator.calibrate(robot_poses, camera_poses)
+            result = self.calibrator.calibrate(method=self.method)
+
+            # 验证结果
+            validation = self.calibrator.validate(result)
+            if not validation["passed"]:
+                self.get_logger().warn(
+                    f"标定误差过大: {validation['error']:.6f}m > {validation['max_error']:.6f}m"
+                )
+                self.state = "failed"
+            else:
+                self.state = "completed"
+                self.get_logger().info(f"标定完成，误差: {validation['error']:.6f}m")
 
             # 发布结果
             result_msg = String()
             result_msg.data = json.dumps(
                 {
-                    "rotation_matrix": result["rotation_matrix"].tolist(),
-                    "translation_vector": result["translation_vector"].tolist(),
-                    "quaternion": result["quaternion"].tolist(),
+                    "rotation_matrix": result["rotation_matrix"],
+                    "translation_vector": result["translation_vector"],
+                    "quaternion": result["quaternion"],
                     "error": result["error"],
-                    "sample_count": len(robot_poses),
+                    "method": result["method"],
+                    "sample_count": result["sample_count"],
                 }
             )
             self.result_pub.publish(result_msg)
 
             # 填充响应
             response.success = True
-            response.error = result["error"]
-            # rotation_matrix: 3x3 flatten to 9 elements
-            rm = result["rotation_matrix"].flatten()
-            response.rotation_matrix = rm.tolist()
-            response.translation_vector = (
-                result["translation_vector"].flatten().tolist()
+            response.message = (
+                f"标定完成，方法: {result['method']}, "
+                f"误差: {result['error']:.6f}m, "
+                f"样本数: {result['sample_count']}"
             )
-            response.quaternion = result["quaternion"]
-            response.message = f"标定完成，误差: {result['error']:.6f}m"
             self.get_logger().info(response.message)
             return response
 
         except Exception as e:
             response.success = False
-            response.error = 0.0
             response.message = f"标定失败: {e}"
             self.get_logger().error(response.message)
+            self.state = "failed"
             return response
 
     def reset_callback(
@@ -182,8 +204,9 @@ class CalibrationCalculatorNode(Node):
         response: std_srvs.srv.Trigger.Response,
     ) -> std_srvs.srv.Trigger.Response:
         """重置标定数据。"""
-
+        self.calibrator.clear()
         self.samples = []
+        self.state = "idle"
         response.success = True
         response.message = "标定数据已重置"
         self.get_logger().info("标定数据已重置")
@@ -192,8 +215,9 @@ class CalibrationCalculatorNode(Node):
     def publish_status(self):
         """发布状态。"""
         status = {
-            "state": "ready" if len(self.samples) > 0 else "idle",
-            "sample_count": len(self.samples),
+            "node": "calculator",
+            "state": self.state,
+            "sample_count": self.calibrator.sample_count,
             "min_samples": self.min_samples,
             "max_samples": self.max_samples,
         }

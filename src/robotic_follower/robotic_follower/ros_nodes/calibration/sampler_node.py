@@ -1,115 +1,92 @@
 #!/usr/bin/env python3
-"""标定采样节点：收集机械臂位姿和相机图像进行手眼标定。
+"""标定采样节点：自动采集机械臂位姿和标定板位姿进行手眼标定。
 
-手眼标定（Eye-in-Hand）场景下，采集机械臂在不同位置时：
-1. 机械臂末端执行器相对基座的位姿 (robot_pose)
-2. 相机相对标定板的位姿 (camera_pose)
+手眼标定（Eye-in-Hand）场景：
+1. 标定板固定在空间中
+2. 相机固联于机械臂末端
+3. 机械臂移动到不同位姿，采集样本
 
-这些样本对用于后续标定计算。
+采集到足够样本后自动执行标定计算。
 
 订阅话题：
-    - /camera/color/image_raw (sensor_msgs/Image)
-        相机彩色图像，用于检测标定板
-    - /robot/pose (geometry_msgs/PoseStamped)
-        机械臂末端执行器相对基座的位姿
     - /aruco_markers (ros2_aruco_interfaces/ArucoMarkers)
         ArUco 标定板检测结果
 
 发布话题：
     - /hand_eye_calibration/calibration_sample (std_msgs/String)
         JSON 格式的标定样本数据
+    - /hand_eye_calibration/status (std_msgs/String)
+        当前状态
 
 服务：
-    - /hand_eye_calibration/start_sampling (std_srvs/Trigger)
-        开始采样
-    - /hand_eye_calibration/stop_sampling (std_srvs/Trigger)
-        停止采样
-    - /hand_eye_calibration/add_sample (std_srvs/Trigger)
-        手动添加当前样本
+    - /hand_eye_calibration/start_calibration (std_srvs/Trigger)
+        开始自动标定采集
+    - /hand_eye_calibration/stop_calibration (std_srvs/Trigger)
+        停止标定采集
 
 参数：
-    - board_type (str, 默认: "circles_asymmetric")
-        标定板类型
-    - board_cols (int, 默认: 4)
-        标定板列数
-    - board_rows (int, 默认: 5)
-        标定板行数
-    - min_sample_interval (float, 默认: 1.0)
-        最小采样间隔（秒）
-    - auto_sample (bool, 默认: True)
-        是否自动采样（检测到标定板时）
+    - min_samples (int, 默认: 15)
+        最小样本数
+    - max_samples (int, 默认: 50)
+        最大样本数
+    - stable_wait (float, 默认: 1.0)
+        到达位姿后等待稳定的时间（秒）
+    - position_threshold (float, 默认: 0.05)
+        位置变化阈值（米）
+    - rotation_threshold (float, 默认: 5.0)
+        姿态变化阈值（度）
 """
 
 import json
+import math
 import time
 
 import numpy as np
 import rclpy
 import std_msgs.msg
 import std_srvs.srv
-from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from ros2_aruco_interfaces.msg import ArucoMarkers
-from sensor_msgs.msg import Image
 
-from robotic_follower.calibration import BoardDetector
-from robotic_follower.point_cloud.io.ros_converters import (
-    geometry_pose_to_transform_matrix,
+from robotic_follower.interfaces import (
+    RobotPoseInterface,
+    CameraPoseInterface,
+    ArmController,
+    CALIBRATION_POSES_DEG,
 )
 
 
 class CalibrationSamplerNode(Node):
-    """标定采样节点。"""
+    """标定采样节点。
+
+    自动控制机械臂移动，采集 robot_pose 和 camera_pose 样本对。
+    样本数达到要求后自动触发标定计算。
+    """
 
     def __init__(self):
         super().__init__("calibration_sampler")
 
         # 参数
-        self.declare_parameter("board_type", "circles_asymmetric")
-        self.declare_parameter("board_cols", 4)
-        self.declare_parameter("board_rows", 5)
-        self.declare_parameter("min_sample_interval", 1.0)
-        self.declare_parameter("auto_sample", True)
+        self.declare_parameter("min_samples", 15)
+        self.declare_parameter("max_samples", 50)
+        self.declare_parameter("stable_wait", 1.0)
+        self.declare_parameter("position_threshold", 0.05)
+        self.declare_parameter("rotation_threshold", 5.0)
 
-        self.board_type = self.get_parameter("board_type").value
-        self.board_cols = self.get_parameter("board_cols").value
-        self.board_rows = self.get_parameter("board_rows").value
-        self.min_interval = self.get_parameter("min_sample_interval").value
-        self.auto_sample = self.get_parameter("auto_sample").value
-
-        # 标定板检测器
-        self.board_detector = BoardDetector(
-            board_type=self.board_type,
-            board_cols=self.board_cols,
-            board_rows=self.board_rows,
-        )
+        self.min_samples = self.get_parameter("min_samples").value
+        self.max_samples = self.get_parameter("max_samples").value
+        self.stable_wait = self.get_parameter("stable_wait").value
+        self.position_threshold = self.get_parameter("position_threshold").value
+        self.rotation_threshold = self.get_parameter("rotation_threshold").value
 
         # 状态
-        self.is_sampling = False
-        self.last_sample_time = 0.0
+        self.state = "idle"  # idle, collecting, calibrating
         self.sample_count = 0
-        self.last_robot_pose: np.ndarray | None = None
-        self.last_camera_pose: np.ndarray | None = None
+        self.samples = []
+        self.last_valid_robot_pose: np.ndarray | None = None
 
-        # 订阅
-        self.image_sub = self.create_subscription(
-            Image,
-            "/camera/color/image_raw",
-            self.image_callback,
-            10,
-        )
-        self.robot_pose_sub = self.create_subscription(
-            PoseStamped,
-            "/robot/pose",
-            self.robot_pose_callback,
-            10,
-        )
-        self.aruco_sub = self.create_subscription(
-            ArucoMarkers,
-            "/aruco_markers",
-            self.aruco_callback,
-            10,
-        )
+        # 初始化接口
+        self._init_interfaces()
 
         # 发布
         self.sample_pub = self.create_publisher(
@@ -117,151 +94,226 @@ class CalibrationSamplerNode(Node):
             "/hand_eye_calibration/calibration_sample",
             10,
         )
+        self.status_pub = self.create_publisher(
+            std_msgs.msg.String,
+            "/hand_eye_calibration/status",
+            10,
+        )
 
         # 服务
-        # from robotic_follower.srv import AddCalibrationSample
-
         self.start_srv = self.create_service(
             std_srvs.srv.Trigger,
-            "/hand_eye_calibration/start_sampling",
-            self.start_sampling_callback,
+            "/hand_eye_calibration/start_calibration",
+            self.start_calibration_callback,
         )
         self.stop_srv = self.create_service(
             std_srvs.srv.Trigger,
-            "/hand_eye_calibration/stop_sampling",
-            self.stop_sampling_callback,
+            "/hand_eye_calibration/stop_calibration",
+            self.stop_calibration_callback,
         )
-        self.add_srv = self.create_service(
+
+        # 调用标定计算的服务客户端
+        self.execute_client = self.create_client(
             std_srvs.srv.Trigger,
-            "/hand_eye_calibration/add_sample",
-            self.add_sample_callback,
+            "/hand_eye_calibration/execute",
         )
 
-        self.get_logger().info("标定采样节点已启动")
+        # 状态发布定时器
+        self.status_timer = self.create_timer(1.0, self._publish_status)
 
-    def image_callback(self, msg: Image):
-        """处理相机图像。"""
-        if not self.is_sampling:
-            return
+        self.get_logger().info(f"标定采样节点已启动，目标样本数: {self.min_samples}")
 
-        # 转换图像
+    def _init_interfaces(self):
+        """初始化 PyMoveIt2 和接口。"""
         try:
-            from cv_bridge import CvBridge
+            from pymoveit2 import MoveIt2
+            from pymoveit2.robots import dummy as robot
 
-            bridge = CvBridge()
-            cv_image = bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        except Exception as e:
-            self.get_logger().warn(f"图像转换失败: {e}")
-            return
+            self.moveit2 = MoveIt2(
+                node=self,
+                joint_names=robot.joint_names(),
+                base_link_name=robot.base_link_name(),
+                end_effector_name=robot.end_effector_name(),
+                group_name=robot.MOVE_GROUP_ARM,
+            )
+            self.get_logger().info("PyMoveIt2 初始化成功")
 
-        # 检测标定板（简化：使用 ArUco 回调的结果）
-        # 实际应该用 image + camera_info 计算位姿
-        # 这里假设 camera_pose 已经通过 /aruco_markers 获取
+            self.robot_pose = RobotPoseInterface(self.moveit2)
+            self.camera_pose = CameraPoseInterface(self, marker_id=0)
+            self.arm_controller = ArmController(self)
 
-    def robot_pose_callback(self, msg: PoseStamped):
-        """处理机械臂位姿。"""
-        self.last_robot_pose = geometry_pose_to_transform_matrix(msg.pose)
+            # 等待关节状态
+            self.arm_controller.wait_for_joint_state(timeout=5.0)
+            self.get_logger().info("接口初始化完成")
 
-        if self.is_sampling and self.auto_sample:
-            current_time = time.time()
-            if current_time - self.last_sample_time >= self.min_interval:
-                if self.try_add_sample():
-                    self.last_sample_time = current_time
+        except ImportError as e:
+            self.get_logger().error(f"PyMoveIt2 导入失败: {e}")
+            self.moveit2 = None
+            self.robot_pose = None
+            self.camera_pose = None
+            self.arm_controller = None
 
-    def aruco_callback(self, msg: ArucoMarkers):
-        """处理 ArUco 检测结果。"""
-        if not self.is_sampling or len(msg.markers) == 0:
-            return
+    def _publish_status(self):
+        """发布当前状态。"""
+        status = {
+            "state": self.state,
+            "sample_count": self.sample_count,
+            "min_samples": self.min_samples,
+            "max_samples": self.max_samples,
+        }
+        msg = std_msgs.msg.String()
+        msg.data = json.dumps(status)
+        self.status_pub.publish(msg)
 
-        # 从 ArUco 标记计算相机相对标定板的位姿
-        # 简化：使用第一个标记的位姿作为 camera_pose
-        marker = msg.markers[0]
-        self.last_camera_pose = np.eye(4)
-        self.last_camera_pose[:3, 3] = [
-            marker.pose.pose.position.x,
-            marker.pose.pose.position.y,
-            marker.pose.pose.position.z,
-        ]
-        # 旋转部分需要从四元数转换（简化处理）
+    def start_calibration_callback(
+        self,
+        request: std_srvs.srv.Trigger.Request,
+        response: std_srvs.srv.Trigger.Response,
+    ) -> std_srvs.srv.Trigger.Response:
+        """开始自动标定采集。"""
+        if self.state != "idle":
+            response.success = False
+            response.message = f"当前状态是 {self.state}，无法开始"
+            return response
 
-    def try_add_sample(self) -> bool:
-        """尝试添加样本。"""
-        if self.last_robot_pose is None:
+        if self.moveit2 is None:
+            response.success = False
+            response.message = "PyMoveIt2 未初始化"
+            return response
+
+        self.get_logger().info(f"[INFO] 开始标定采集，目标样本数: {self.min_samples}")
+        self.state = "collecting"
+        self.sample_count = 0
+        self.samples = []
+        self.last_valid_robot_pose = None
+
+        response.success = True
+        response.message = f"开始标定采集，目标样本数: {self.min_samples}"
+
+        # 在新线程中执行采集
+        import threading
+        thread = threading.Thread(target=self._calibration_loop)
+        thread.daemon = True
+        thread.start()
+
+        return response
+
+    def stop_calibration_callback(
+        self,
+        request: std_srvs.srv.Trigger.Request,
+        response: std_srvs.srv.Trigger.Response,
+    ) -> std_srvs.srv.Trigger.Response:
+        """停止标定采集。"""
+        if self.state == "idle":
+            response.success = True
+            response.message = "已经在空闲状态"
+            return response
+
+        self.get_logger().info(f"[INFO] 已停止采集，共采集 {self.sample_count} 个样本")
+        self.state = "idle"
+
+        response.success = True
+        response.message = f"已停止采集，共 {self.sample_count} 个样本"
+        return response
+
+    def _calibration_loop(self):
+        """标定采集主循环。"""
+        self.get_logger().info("开始执行标定位姿序列...")
+
+        def on_pose_reached(pose_index: int, joints_deg: list):
+            """到达每个位姿后的回调。"""
+            if self.state != "collecting":
+                return
+
+            self.get_logger().info(f"到达位姿 {pose_index + 1}，等待稳定...")
+
+            # 等待稳定
+            time.sleep(self.stable_wait)
+
+            # 尝试采集样本
+            if self._try_add_sample():
+                self.get_logger().info(f"[INFO] 已采集样本 #{self.sample_count}")
+            else:
+                self.get_logger().warn("样本无效或标定板未检测到")
+
+        # 执行位姿序列
+        success_count = self.arm_controller.execute_calibration_poses(
+            on_pose_reached=on_pose_reached,
+            stable_wait=self.stable_wait
+        )
+
+        self.get_logger().info(f"标定位姿序列执行完成，成功 {success_count}/{len(CALIBRATION_POSES_DEG)}")
+
+        # 检查是否需要重复采集
+        if self.sample_count < self.min_samples and self.state == "collecting":
+            self.get_logger().info(f"样本不足 ({self.sample_count}/{self.min_samples})，重复采集...")
+            time.sleep(2.0)
+            self.arm_controller.execute_calibration_poses(
+                on_pose_reached=on_pose_reached,
+                stable_wait=self.stable_wait
+            )
+
+        # 采集完成
+        if self.sample_count >= self.min_samples:
+            self._trigger_calibration()
+        else:
+            self.get_logger().warn(f"样本仍不足 ({self.sample_count}/{self.min_samples})，标定终止")
+            self.state = "idle"
+
+    def _try_add_sample(self) -> bool:
+        """尝试添加样本。
+
+        Returns:
+            True if 样本有效并添加成功
+        """
+        # 获取 robot_pose
+        robot_pose_matrix = self.robot_pose.get_pose_as_matrix()
+        if robot_pose_matrix is None:
+            self.get_logger().warn("无法获取机器人位姿")
             return False
 
-        # 构造 camera_pose（简化版，实际需要棋盘格/ArUco 姿态）
-        if self.last_camera_pose is None:
-            self.last_camera_pose = np.eye(4)
-
-        return self.add_sample()
-
-    def add_sample(self) -> bool:
-        """添加样本并发布。"""
-        if self.last_robot_pose is None:
-            self.get_logger().warn("无机械臂位姿，无法添加样本")
+        # 获取 camera_pose
+        camera_pose_matrix = self.camera_pose.get_pose_as_matrix()
+        if camera_pose_matrix is None:
+            self.get_logger().warn("未检测到标定板")
             return False
 
-        sample_data = {
+        # 检查位姿变化
+        if self.last_valid_robot_pose is not None:
+            pos_diff = np.linalg.norm(robot_pose_matrix[:3, 3] - self.last_valid_robot_pose[:3, 3])
+            if pos_diff < self.position_threshold:
+                self.get_logger().warn(f"位置变化不足: {pos_diff:.3f}m < {self.position_threshold}m")
+                return False
+
+        # 添加样本
+        sample = {
             "sample_id": self.sample_count,
-            "robot_pose": self.last_robot_pose.tolist(),
-            "camera_pose": self.last_camera_pose.tolist()
-            if self.last_camera_pose is not None
-            else None,
+            "robot_pose": robot_pose_matrix.flatten().tolist(),
+            "camera_pose": camera_pose_matrix.flatten().tolist(),
             "timestamp": time.time(),
         }
+        self.samples.append(sample)
 
+        # 发布样本（包装在 sample 字段中以匹配 calculator_node 期望的格式）
         msg = std_msgs.msg.String()
-        msg.data = json.dumps(sample_data)
+        msg.data = json.dumps({"sample": sample})
         self.sample_pub.publish(msg)
 
         self.sample_count += 1
-        self.get_logger().info(f"已添加样本 #{self.sample_count}")
+        self.last_valid_robot_pose = robot_pose_matrix.copy()
+
         return True
 
-    def start_sampling_callback(
-        self,
-        request: std_srvs.srv.Trigger.Request,
-        response: std_srvs.srv.Trigger.Response,
-    ) -> std_srvs.srv.Trigger.Response:
-        """开始采样服务回调。"""
-        self.is_sampling = True
-        self.last_sample_time = time.time()
-        response.success = True
-        response.message = "开始采样"
-        self.get_logger().info("开始标定采样")
-        return response
+    def _trigger_calibration(self):
+        """触发标定计算。"""
+        self.state = "calibrating"
+        self.get_logger().info("[INFO] 样本采集完成，调用标定计算...")
 
-    def stop_sampling_callback(
-        self,
-        request: std_srvs.srv.Trigger.Request,
-        response: std_srvs.srv.Trigger.Response,
-    ) -> std_srvs.srv.Trigger.Response:
-        """停止采样服务回调。"""
-        self.is_sampling = False
-        response.success = True
-        response.message = f"已停止采样，共 {self.sample_count} 个样本"
-        self.get_logger().info(f"停止标定采样，共 {self.sample_count} 个样本")
-        return response
-
-    def add_sample_callback(
-        self,
-        request: std_srvs.srv.Trigger.Request,
-        response: std_srvs.srv.Trigger.Response,
-    ) -> std_srvs.srv.Trigger.Response:
-        """手动添加样本服务回调。"""
-
-        if not self.is_sampling:
-            response.success = False
-            response.message = f"未开始采样，当前样本数: {self.sample_count}"
-            return response
-
-        if self.try_add_sample():
-            response.success = True
-            response.message = f"已添加样本 #{self.sample_count}"
-        else:
-            response.success = False
-            response.message = f"添加样本失败，当前样本数: {self.sample_count}"
-        return response
+        # 通过服务调用 calculator_node 执行标定
+        from std_srvs.srv import Trigger
+        request = Trigger.Request()
+        future = self.execute_client.call_async(request)
+        # 注意：这里不等待结果，因为 calculator_node 会通过 /calibration_result 话题发布结果
 
 
 def main(args=None):

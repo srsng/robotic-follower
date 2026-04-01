@@ -1,15 +1,16 @@
-"""相机与标定相关组件。"""
+"""标定模块：手眼标定算法实现。"""
 
-from .board_detector import BoardDetector
-from .calibration_manager import CalibrationManager
-from .calibration_validator import CalibrationValidator
-from .camera_capture import CameraCapture
-from .extrinsic_calibrator import ExtrinsicCalibrator
+from .extrinsic_calibrator import (
+    ExtrinsicCalibrator,
+    calibrate_handeye,
+    compute_calibration_error,
+    find_best_calibration_method,
+)
+
 
 __all__ = [
-    "BoardDetector",
-    "CalibrationManager",
-    "CalibrationValidator",
-    "CameraCapture",
     "ExtrinsicCalibrator",
+    "calibrate_handeye",
+    "compute_calibration_error",
+    "find_best_calibration_method",
 ]
