@@ -63,15 +63,12 @@ class Detector3D:
             print(f"警告：模型加载失败: {e}")
             self.model = None
 
-    def detect(
-        self, points: np.ndarray, density: np.ndarray | None = None
-    ) -> list[dict]:
+    def detect(self, points: np.ndarray) -> list[dict]:
         """
         执行 3D 目标检测。
 
         Args:
             points: 输入点云 (N, 3)
-            density: 密度特征 (N,)，可选
 
         Returns:
             检测结果列表，每个结果包含：
@@ -86,15 +83,6 @@ class Detector3D:
         # 准备输入数据 - 确保类型正确
         points = points.astype(np.float32, copy=False)
 
-        if density is not None:
-            # 将密度作为额外通道
-            density = density.astype(np.float32, copy=False)
-            points_with_density = np.concatenate(
-                [points, density[:, np.newaxis]], axis=1
-            )
-        else:
-            points_with_density = points
-
         # 执行推理
         try:
             from mmdet3d.apis import inference_detector
@@ -103,7 +91,8 @@ class Detector3D:
             if "cuda" in self.device and torch.cuda.is_available():
                 self.model.to(self.device)
 
-            result = inference_detector(self.model, points_with_density)
+            # inference_detector 内部使用 test_pipeline 自动计算密度等特征
+            result = inference_detector(self.model, points)
 
             # mmdet3d 1.x 中 inference_detector 的返回值通常是一个包含结果和数据的元组 (result, data)
             # 或者如果是批处理推理，返回的可能是列表。这里进行兼容处理。
@@ -199,24 +188,18 @@ class DensityFusionDetector(Detector3D):
         self.use_density_fusion = use_density_fusion
         super().__init__(config_file, checkpoint_file, device, score_threshold)
 
-    def detect(
-        self, points: np.ndarray, density: np.ndarray | None = None
-    ) -> list[dict]:
+    def detect(self, points: np.ndarray) -> list[dict]:
         """
         执行密度融合 3D 检测。
 
         Args:
             points: 输入点云 (N, 3)
-            density: 密度特征 (N,)
 
         Returns:
             检测结果列表
         """
-        if self.use_density_fusion and density is not None:
-            # 使用密度融合
-            return super().detect(points, density)
-        # 标准检测
-        return super().detect(points, None)
+        # 密度由 pipeline 自动计算，无需外部传入
+        return super().detect(points)
 
 
 def create_detector_from_config(config: dict) -> Detector3D:
