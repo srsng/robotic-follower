@@ -6,6 +6,7 @@
 import numpy as np
 from geometry_msgs.msg import Pose
 from rclpy.node import Node
+from ros2_aruco_interfaces.msg import ArucoMarkers
 
 
 class CameraPoseInterface:
@@ -32,7 +33,7 @@ class CameraPoseInterface:
         self._marker_detected = False
 
         self.node.create_subscription(
-            "ros2_aruco_interfaces/msg/ArucoMarkers",
+            ArucoMarkers,
             "/aruco_markers",
             self._aruco_callback,
             10,
@@ -98,14 +99,15 @@ class CameraPoseInterface:
             pose.orientation.z,
             pose.orientation.w,
         )
+        # 标准四元数转旋转矩阵公式
         matrix[0, 0] = 1 - 2 * (qy**2 + qz**2)
-        matrix[1, 0] = 2 * (qx * qy - qz * qw)
-        matrix[2, 0] = 2 * (qz * qx + qy * qw)
-        matrix[0, 1] = 2 * (qx * qy + qz * qw)
+        matrix[0, 1] = 2 * (qx * qy - qz * qw)
+        matrix[0, 2] = 2 * (qx * qz + qy * qw)
+        matrix[1, 0] = 2 * (qx * qy + qz * qw)
         matrix[1, 1] = 1 - 2 * (qx**2 + qz**2)
-        matrix[2, 1] = 2 * (qy * qz - qx * qw)
-        matrix[0, 2] = 2 * (qz * qx - qy * qw)
-        matrix[1, 2] = 2 * (qy * qz + qx * qw)
+        matrix[1, 2] = 2 * (qy * qz - qx * qw)
+        matrix[2, 0] = 2 * (qx * qz - qy * qw)
+        matrix[2, 1] = 2 * (qy * qz + qx * qw)
         matrix[2, 2] = 1 - 2 * (qx**2 + qy**2)
 
         return matrix

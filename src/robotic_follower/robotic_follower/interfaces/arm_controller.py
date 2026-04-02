@@ -192,7 +192,7 @@ class ArmController:
 
         return goal
 
-    def _send_goal_and_wait(self, goal) -> None:
+    def _send_goal_and_wait(self, goal) -> "MoveGroup.GoalHandle | None":
         """发送 goal 并等待接受。
 
         Args:

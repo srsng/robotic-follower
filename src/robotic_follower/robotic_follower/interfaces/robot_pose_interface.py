@@ -46,29 +46,30 @@ class RobotPoseInterface:
         matrix[0, 3] = pose.position.x
         matrix[1, 3] = pose.position.y
         matrix[2, 3] = pose.position.z
+        # 标准四元数转旋转矩阵公式
         matrix[0, 0] = 1 - 2 * (pose.orientation.y**2 + pose.orientation.z**2)
-        matrix[1, 0] = 2 * (
+        matrix[0, 1] = 2 * (
             pose.orientation.x * pose.orientation.y
             - pose.orientation.z * pose.orientation.w
         )
-        matrix[2, 0] = 2 * (
-            pose.orientation.z * pose.orientation.x
+        matrix[0, 2] = 2 * (
+            pose.orientation.x * pose.orientation.z
             + pose.orientation.y * pose.orientation.w
         )
-        matrix[0, 1] = 2 * (
+        matrix[1, 0] = 2 * (
             pose.orientation.x * pose.orientation.y
             + pose.orientation.z * pose.orientation.w
         )
         matrix[1, 1] = 1 - 2 * (pose.orientation.x**2 + pose.orientation.z**2)
-        matrix[2, 1] = 2 * (
+        matrix[1, 2] = 2 * (
             pose.orientation.y * pose.orientation.z
             - pose.orientation.x * pose.orientation.w
         )
-        matrix[0, 2] = 2 * (
-            pose.orientation.z * pose.orientation.x
+        matrix[2, 0] = 2 * (
+            pose.orientation.x * pose.orientation.z
             - pose.orientation.y * pose.orientation.w
         )
-        matrix[1, 2] = 2 * (
+        matrix[2, 1] = 2 * (
             pose.orientation.y * pose.orientation.z
             + pose.orientation.x * pose.orientation.w
         )

@@ -47,6 +47,13 @@ class TFPublisherNode(Node):
         self.publish_rate = self.get_parameter("publish_rate").value
         self.config_namespace = self.get_parameter("config_namespace").value
 
+        # 声明标定结果参数（默认值，result_manager 会更新这些值）
+        self.declare_parameter(f"{self.config_namespace}.translation", [0.0, 0.0, 0.0])
+        self.declare_parameter(f"{self.config_namespace}.rotation", [0.0, 0.0, 0.0, 1.0])
+        self.declare_parameter(f"{self.config_namespace}.error", 0.0)
+        self.declare_parameter(f"{self.config_namespace}.status", "idle")
+        self.declare_parameter(f"{self.config_namespace}.sample_count", 0)
+
         # TF 发布器
         self.tf_broadcaster = TransformBroadcaster(self)
 
@@ -91,12 +98,12 @@ class TFPublisherNode(Node):
         """参数变化回调。"""
         for param in params:
             if param.name == f"{self.config_namespace}.translation":
-                if param.type == rclpy.Parameter.Type.DOUBLE_ARRAY:
+                if param.type_ == rclpy.Parameter.Type.DOUBLE_ARRAY:
                     self.current_transform.transform.translation.x = param.value[0]
                     self.current_transform.transform.translation.y = param.value[1]
                     self.current_transform.transform.translation.z = param.value[2]
             elif param.name == f"{self.config_namespace}.rotation":
-                if param.type == rclpy.Parameter.Type.DOUBLE_ARRAY:
+                if param.type_ == rclpy.Parameter.Type.DOUBLE_ARRAY:
                     # 四元数 [x, y, z, w]
                     self.current_transform.transform.rotation.x = param.value[0]
                     self.current_transform.transform.rotation.y = param.value[1]
@@ -111,7 +118,7 @@ class TFPublisherNode(Node):
             translation_param = self.get_parameter(
                 f"{self.config_namespace}.translation"
             )
-            if translation_param.type == rclpy.Parameter.Type.DOUBLE_ARRAY:
+            if translation_param.type_ == rclpy.Parameter.Type.DOUBLE_ARRAY:
                 t = translation_param.value
                 self.current_transform.transform.translation.x = t[0]
                 self.current_transform.transform.translation.y = t[1]
@@ -119,7 +126,7 @@ class TFPublisherNode(Node):
 
             # 读取旋转（四元数）
             rotation_param = self.get_parameter(f"{self.config_namespace}.rotation")
-            if rotation_param.type == rclpy.Parameter.Type.DOUBLE_ARRAY:
+            if rotation_param.type_ == rclpy.Parameter.Type.DOUBLE_ARRAY:
                 q = rotation_param.value
                 self.current_transform.transform.rotation.x = q[0]
                 self.current_transform.transform.rotation.y = q[1]
