@@ -331,7 +331,7 @@ def main(args=None):
         widget3d.scene.add_geometry("Point Cloud", pcd, mat_pcd)
 
         # 坐标系
-        coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0)
+        coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
         widget3d.scene.add_geometry("Coordinate Frame", coord_frame, mat_pcd)
 
         # 检测框
