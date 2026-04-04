@@ -41,8 +41,6 @@ class Detector3D:
             self.model = None
             return
 
-        import os
-
         if not os.path.exists(self.checkpoint_file):
             print(f"警告：模型文件不存在: {self.checkpoint_file}，使用模拟检测器")
             self.model = None
@@ -164,44 +162,6 @@ class Detector3D:
         ]
 
 
-class DensityFusionDetector(Detector3D):
-    """密度融合 3D 检测器（自定义 CGNL Neck）。"""
-
-    def __init__(
-        self,
-        config_file: str,
-        checkpoint_file: str,
-        device: str = "cuda:0",
-        score_threshold: float = 0.3,
-        use_density_fusion: bool = True,
-    ):
-        """
-        初始化密度融合检测器。
-
-        Args:
-            config_file: 配置文件路径
-            checkpoint_file: 权重文件路径
-            device: 设备
-            score_threshold: 置信度阈值
-            use_density_fusion: 是否使用密度融合
-        """
-        self.use_density_fusion = use_density_fusion
-        super().__init__(config_file, checkpoint_file, device, score_threshold)
-
-    def detect(self, points: np.ndarray) -> list[dict]:
-        """
-        执行密度融合 3D 检测。
-
-        Args:
-            points: 输入点云 (N, 3)
-
-        Returns:
-            检测结果列表
-        """
-        # 密度由 pipeline 自动计算，无需外部传入
-        return super().detect(points)
-
-
 def create_detector_from_config(config: dict) -> Detector3D:
     """
     从配置字典创建检测器。
@@ -214,14 +174,6 @@ def create_detector_from_config(config: dict) -> Detector3D:
     """
     detector_type = config.get("type", "standard")
 
-    if detector_type == "density_fusion":
-        return DensityFusionDetector(
-            config_file=config["config_file"],
-            checkpoint_file=config["checkpoint_file"],
-            device=config.get("device", "cuda:0"),
-            score_threshold=config.get("score_threshold", 0.3),
-            use_density_fusion=config.get("use_density_fusion", True),
-        )
     return Detector3D(
         config_file=config["config_file"],
         checkpoint_file=config["checkpoint_file"],
