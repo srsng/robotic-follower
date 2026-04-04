@@ -7,61 +7,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 这是一个基于 ROS2 Humble 的机械臂视觉跟随系统，采用开环控制架构，充分复用社区成熟方案：
 
 - **realsense2_camera**: 相机采集（ROS2官方包，apt安装）
-- **perception**: 感知模块，点云处理(Open3D) + 3D目标检测(MMDetection3D)
-- **hand_eye_calibration**: 手眼标定模块，获取手眼变换矩阵 + TF自动发布
 - **ros2_dummy_arm_810**: 机械臂驱动 + MoveIt2运动规划（含PyMoveIt2接口）
-- **visual_follow**: 视觉跟随协调器（待实现），连接感知与运动控制
+- **robotic_follower**: 自定义包，核心工作区，代码基本都在这里改
 
 ## 开发环境配置
 
 ### Python 环境
 
-本项目使用全局 Python 3 + pip，**不使用 conda**。
-
-```bash
-# 检查 Python 版本（需要 3.10）
-python3 --version
-
-# 确认 pip 使用全局 Python
-which pip3  # 应该路径类似 /usr/bin/pip3
-```
+本项目使用全局 `python3` + `pip`, **不使用 conda**。
 
 ### ROS2 环境
 
-```bash
-# 加载 ROS2 Humble 环境（每次打开新终端都需要）
-source /opt/ros/humble/setup.bash
-
-# 为了方便，可以添加到 ~/.bashrc
-echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
-```
+已经添加 "source /opt/ros/humble/setup.bash" 到 ~/.bashrc, 不用再处理
 
 ### 工作空间环境
 
-```bash
-# 编译后加载工作空间环境
-source ~/ros2_ws/install/setup.bash
-
-# 添加到 ~/.bashrc（可选）
-echo "source ~/ros2_ws/install/setup.bash" >> ~/.bashrc
-```
-
-### USB 设备权限
-
-机械臂 USB VID/PID: VID: 0x1209, PID: 0x0D31, 0x0D32, 0x0D33
-
-```bash
-# 创建 udev 规则
-sudo tee /etc/udev/rules.d/99-robot-arm.rules > /dev/null <<EOF
-SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="0D31", MODE="0666"
-SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="0D32", MODE="0666"
-SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="0D33", MODE="0666"
-EOF
-
-# 重新加载规则
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
+已经添加 "source ~/ros2_ws/install/setup.bash" 到 ~/.bashrc, 不用再处理
 
 ## 开发工作流
 
@@ -103,8 +64,6 @@ source install/setup.bash
 ### 3. 运行节点
 
 ```bash
-# 加载工作空间环境
-source install/setup.bash
 
 # 运行节点
 ros2 run package_name node_name
@@ -181,9 +140,13 @@ class MyNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MyNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("收到中断信号")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
@@ -191,14 +154,14 @@ if __name__ == '__main__':
 
 ### ROS2 节点命名规范
 
-- 节点名称：使用小写字母和下划线，如 `camera_node`
+- 节点名称：使用小写字母和下划线，如 `camera_sim_node`
 - 话题名称：使用斜杠分隔，如 `/camera/color/image_raw`
 - 服务名称：使用斜杠分隔，如 `/hand_eye_calibration/add_sample`
 - 参数名称：使用下划线，如 `publish_rate`
 
 ### 文件命名规范
 
-- Python 文件：小写字母和下划线，如 `camera_node.py`
+- Python 文件：小写字母和下划线，如 `camera_sim_node.py`
 - Launch 文件：小写字母和下划线，如 `camera.launch.py`
 - 配置文件：小写字母和下划线，如 `camera_config.yaml`
 
@@ -296,45 +259,35 @@ colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Debug
 
 ```bash
 # 设置日志级别为 debug
-ros2 run package_name node_name --ros-args --log-level debug
+ros2 run robotic_follower node_name --ros-args --log-level debug
 
 # 设置特定节点的日志级别
-ros2 run package_name node_name --ros-args --log-level node_name:=debug
+ros2 run robotic_follower node_name --ros-args --log-level node_name:=debug
 
 # 设置特定日志器
-ros2 run package_name node_name --ros-args --log-level logger_name:=debug
-```
-
-### Rviz2 可视化
-
-```bash
-# 启动 Rviz2
-rviz2
-
-# 加载配置文件
-rviz2 -d config/default.rviz
+ros2 run robotic_follower node_name --ros-args --log-level logger_name:=debug
 ```
 
 ## 模块开发指南
 
 ### 添加新的 ROS2 节点
 
-1. 在 `src/package_name/package_name/ros_nodes/` 创建节点文件
-2. 在 `src/package_name/package_name/ros_nodes/__init__.py` 导出
+1. 在 `src/robotic_follower/robotic_follower/ros_nodes/` 创建节点文件
+2. 在 `src/robotic_follower/robotic_follower/ros_nodes/__init__.py` 导出
 3. 在 `setup.py` 的 `entry_points` 添加入口点
-4. 创建 launch 文件在 `src/package_name/launch/`
+4. 创建 launch 文件在 `src/robotic_follower/launch/`
 5. 更新 `package.xml` 依赖
 
 ### 添加新的服务
 
-1. 创建 srv 文件在 `src/package_name/srv/`
+1. 创建 srv 文件在 `src/robotic_follower/srv/`
 2. 在 `package.xml` 添加 `<build_depend>rosidl_default_generators</build_depend>`
 3. 在 `CMakeLists.txt` 添加服务生成（C++）或更新依赖（Python3）
 4. 在节点中创建服务提供者
 
 ### 添加新的消息
 
-1. 创建 msg 文件在 `src/package_name/msg/`
+1. 创建 msg 文件在 `src/robotic_follower/msg/`
 2. 在 `package.xml` 添加依赖
 3. 重新编译包
 4. 使用消息类型
@@ -398,53 +351,17 @@ ros2 interface show package_name/srv/ServiceType
 ```
 ros2_ws/
 ├── src/                              # 源代码目录
-│   ├── perception/                    # 感知模块（自研）
-│   │   ├── perception/
-│   │   │   ├── point_cloud/          # 点云处理（Open3D）
-│   │   │   ├── detection/            # 3D检测（MMDetection3D集成）
-│   │   │   │   └── modules/cgnl.py   # CGNL Neck（自定义注册到mmdet3d）
-│   │   │   └── ros_nodes/            # ROS2节点
-│   │   ├── configs/                   # mmdet3d 配置文件
-│   │   ├── launch/
-│   │   ├── setup.py
-│   │   └── package.xml
-│   ├── hand_eye_calibration/          # 手眼标定模块（自研）
-│   │   ├── hand_eye_calibration/
-│   │   │   ├── calibration/           # 标定算法
-│   │   │   ├── camera/                # 标定板检测
-│   │   │   └── ros_nodes/             # 标定节点 + TF发布
-│   │   ├── results/                    # 标定结果（自动加载）
-│   │   ├── launch/
-│   │   ├── setup.py
-│   │   └── package.xml
-│   ├── ros2_dummy_arm_810/            # 机械臂驱动 + MoveIt（自研）
-│   │   ├── dummy_controller/           # 硬件驱动
-│   │   ├── dummy-ros2_description/     # URDF
-│   │   ├── dummy_moveit_config/        # MoveIt2配置 + Launch
-│   │   └── dummy_server/               # PyMoveIt2接口
-│   └── visual_follow/                 # 视觉跟随协调器（待实现）
+│   ├── robotic_follower/          # 手眼标定模块
+│   └── ros2_dummy_arm_810/            # 机械臂驱动 + MoveIt
 ├── install/                           # 编译输出
 ├── build/                             # 构建中间文件
 ├── log/                               # 构建日志
 ├── doc/                               # 文档
-│   ├── modules/                        # 模块设计文档
-│   │   ├── README.md                   # 模块总览
-│   │   ├── 02_perception.md            # 感知模块设计
-│   │   └── 01_hand_eye_calibration.md  # 手眼标定模块设计
-│   └── main.md                         # 系统设计文档
 ├── CLAUDE.md                          # 开发指南（本文件）
 └── README.md                          # 项目说明
 ```
 
 ## 模块间数据流
-
-```
-realsense2_camera → perception → visual_follow → MoveIt2/PyMoveIt2 → dummy_arm_controller
-                                     ↕
-                              tf2_ros(坐标变换)
-                                     ↑
-                         hand_eye_calibration (TF发布)
-```
 
 ## 系统话题汇总
 
@@ -457,7 +374,7 @@ realsense2_camera → perception → visual_follow → MoveIt2/PyMoveIt2 → dum
 | `/camera/aligned_depth_to_color/image_raw` | `sensor_msgs/Image`            | realsense2_camera    |
 | `/camera/color/camera_info`                | `sensor_msgs/CameraInfo`       | realsense2_camera    |
 | `/camera/camera/depth/color/points`        | `sensor_msgs/PointCloud2`      | realsense2_camera    |
-| `/perception/detections`                   | `vision_msgs/Detection3DArray` | perception           |
+| `/perception/detections`                   | `vision_msgs/Detection3DArray` | detection_node       |
 | `/joint_states`                            | `sensor_msgs/JointState`       | dummy_arm_controller |
 
 ### 服务汇总
@@ -495,12 +412,6 @@ camera_depth_optical_frame (深度相机光学坐标系，由 realsense2_camera 
 | link6_1_1 → camera_link       | hand_eye_calibration       | 动态 (10Hz周期发布)      |
 | camera_link → *_optical_frame | realsense2_camera          | 静态/动态 (相机内部变换) |
 
-## 设计文档
+## 文档
 
-详细模块设计文档位于 `doc/modules/` 目录：
-
-| 文档                                     | 说明               |
-| ---------------------------------------- | ------------------ |
-| `doc/modules/README.md`                  | 模块总览与系统运行 |
-| `doc/modules/01_hand_eye_calibration.md` | 手眼标定模块设计   |
-| `doc/modules/02_perception.md`           | 感知模块设计       |
+位于 `doc/` 目录：
