@@ -10,3 +10,6 @@
 	path = src/hand_eyes_calibration
 	url = https://github.com/231055558/ros2_dummy_arm_810
     branch = main
+[submodule "3rdparty/DSPDet3D"]
+	path = 3rdparty/DSPDet3D
+	url = https://github.com/xuxw98/DSPDet3D.git
