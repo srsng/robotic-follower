@@ -15,6 +15,7 @@ class Detector3D:
         checkpoint_file: str,
         device: str = "cuda:0",
         score_threshold: float = 0.3,
+        detector_type: str = "mmdet3d",
     ):
         """
         初始化 3D 检测器。
@@ -24,11 +25,13 @@ class Detector3D:
             checkpoint_file: 模型权重文件路径
             device: 设备 ('cuda:0' 或 'cpu')
             score_threshold: 检测置信度阈值
+            detector_type: 检测器类型 ('mmdet3d', 'dspdet3d')
         """
         self.config_file = os.path.expanduser(config_file)
         self.checkpoint_file = os.path.expanduser(checkpoint_file)
         self.device = device
         self.score_threshold = score_threshold
+        self.detector_type = detector_type
         self.model = None
 
         self._load_model()
@@ -37,25 +40,23 @@ class Detector3D:
         """加载 MMDetection3D 模型。"""
         # 检查权重文件是否存在
         if not self.checkpoint_file:
-            print("警告：未配置模型权重文件，使用模拟检测器")
+            print("警告：未配置模型权重文件")
             self.model = None
             return
 
         if not os.path.exists(self.checkpoint_file):
-            print(f"警告：模型文件不存在: {self.checkpoint_file}，使用模拟检测器")
+            print(f"警告：模型文件不存在: {self.checkpoint_file}")
             self.model = None
             return
 
         try:
             from mmdet3d.apis import init_model
 
-            # 如果没有配置文件，使用 None（某些模型支持）
             config = self.config_file if self.config_file else None
-
             self.model = init_model(config, self.checkpoint_file, device=self.device)
             print(f"✓ 成功加载 3D 检测模型: {self.checkpoint_file}")
         except ImportError as e:
-            print(f"警告：MMDetection3D 导入失败: {e}，使用模拟检测器")
+            print(f"警告：MMDetection3D 模块导入失败: {e}")
             self.model = None
         except Exception as e:
             print(f"警告：模型加载失败: {e}")
@@ -172,11 +173,12 @@ def create_detector_from_config(config: dict) -> Detector3D:
     Returns:
         Detector3D 实例
     """
-    detector_type = config.get("type", "standard")
+    detector_type = config.get("type", "mmdet3d")
 
     return Detector3D(
         config_file=config["config_file"],
         checkpoint_file=config["checkpoint_file"],
         device=config.get("device", "cuda:0"),
         score_threshold=config.get("score_threshold", 0.3),
+        detector_type=detector_type,
     )
