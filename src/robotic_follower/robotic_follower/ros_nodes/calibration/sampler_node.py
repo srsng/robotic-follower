@@ -78,7 +78,7 @@ class CalibrationSamplerNode(Node):
         self.rotation_threshold = self.get_parameter("rotation_threshold").value
 
         # 状态
-        self.state = "idle"  # idle, collecting, calibrating
+        self.state = "idle"  # idle, sampling, calibrating
         self.sample_count = 0
         self.samples = []
         self.last_valid_robot_pose: np.ndarray | None = None
@@ -108,6 +108,11 @@ class CalibrationSamplerNode(Node):
             std_srvs.srv.Trigger,
             "/hand_eye_calibration/stop_calibration",
             self.stop_calibration_callback,
+        )
+        self.add_sample_srv = self.create_service(
+            std_srvs.srv.Trigger,
+            "/hand_eye_calibration/add_sample",
+            self.add_sample_callback,
         )
 
         # 调用标定计算的服务客户端
@@ -180,7 +185,7 @@ class CalibrationSamplerNode(Node):
             return response
 
         self.get_logger().info(f"[INFO] 开始标定采集，目标样本数: {self.min_samples}")
-        self.state = "collecting"
+        self.state = "sampling"
         self.sample_count = 0
         self.samples = []
         self.last_valid_robot_pose = None
@@ -215,13 +220,35 @@ class CalibrationSamplerNode(Node):
         response.message = f"已停止采集，共 {self.sample_count} 个样本"
         return response
 
+    def add_sample_callback(
+        self,
+        request: std_srvs.srv.Trigger.Request,
+        response: std_srvs.srv.Trigger.Response,
+    ) -> std_srvs.srv.Trigger.Response:
+        """手动添加单个样本。"""
+        if self.state != "sampling":
+            response.success = False
+            response.message = f"当前状态是 {self.state}，只有在采样中才能手动添加样本"
+            return response
+
+        if self._try_add_sample():
+            response.success = True
+            response.message = f"已添加样本 #{self.sample_count}"
+            self.get_logger().info(f"[INFO] 手动添加样本 #{self.sample_count}")
+        else:
+            response.success = False
+            response.message = "添加样本失败（标定板未检测到或位姿无效）"
+            self.get_logger().warn("手动添加样本失败")
+
+        return response
+
     def _calibration_loop(self):
         """标定采集主循环。"""
         self.get_logger().info("开始执行标定位姿序列...")
 
         def on_pose_reached(pose_index: int, joints_deg: list):
             """到达每个位姿后的回调。"""
-            if self.state != "collecting":
+            if self.state != "sampling":
                 return
 
             self.get_logger().info(f"到达位姿 {pose_index + 1}，等待稳定...")
@@ -245,7 +272,7 @@ class CalibrationSamplerNode(Node):
         )
 
         # 检查是否需要重复采集
-        if self.sample_count < self.min_samples and self.state == "collecting":
+        if self.sample_count < self.min_samples and self.state == "sampling":
             self.get_logger().info(
                 f"样本不足 ({self.sample_count}/{self.min_samples})，重复采集..."
             )
@@ -276,6 +303,10 @@ class CalibrationSamplerNode(Node):
             return False
 
         # 获取 camera_pose
+        if not self.camera_pose.is_marker_detected():
+            self.get_logger().warn("未检测到标定板")
+            return False
+
         camera_pose_matrix = self.camera_pose.get_pose_as_matrix()
         if camera_pose_matrix is None:
             self.get_logger().warn("未检测到标定板")

@@ -82,8 +82,8 @@ class CalibrationUIPanel:
     def _init_service_clients(self):
         """初始化 ROS 服务客户端。"""
         services = [
-            "/hand_eye_calibration/start_sampling",
-            "/hand_eye_calibration/stop_sampling",
+            "/hand_eye_calibration/start_calibration",
+            "/hand_eye_calibration/stop_calibration",
             "/hand_eye_calibration/add_sample",
             "/hand_eye_calibration/execute",
             "/hand_eye_calibration/save_result",
@@ -106,7 +106,7 @@ class CalibrationUIPanel:
         """创建状态显示区。"""
         import open3d.visualization.gui as gui
 
-        self.panel.add_child(gui.Label("─" * 24))
+        self.panel.add_child(gui.Label("-" * 24))
 
         self.panel.add_child(gui.Label("Status:"))
         self.status_label = gui.Label("Idle")
@@ -120,7 +120,7 @@ class CalibrationUIPanel:
         self.error_label = gui.Label("N/A")
         self.panel.add_child(self.error_label)
 
-        self.panel.add_child(gui.Label("─" * 24))
+        self.panel.add_child(gui.Label("-" * 24))
 
     def _create_button_section(self):
         """创建按钮区。"""
@@ -145,7 +145,7 @@ class CalibrationUIPanel:
         self.execute_btn.enabled = False
         self.panel.add_child(self.execute_btn)
 
-        self.panel.add_child(gui.Label("─" * 24))
+        self.panel.add_child(gui.Label("-" * 24))
 
         # 保存/加载按钮
         btn_row = gui.Horiz(0, gui.Margins(margin, margin, margin, margin))
@@ -193,9 +193,9 @@ class CalibrationUIPanel:
     def _on_start_stop_clicked(self):
         """开始/停止采样按钮回调。"""
         if self._is_sampling:
-            self._call_service("/hand_eye_calibration/stop_sampling")
+            self._call_service("/hand_eye_calibration/stop_calibration")
         else:
-            self._call_service("/hand_eye_calibration/start_sampling")
+            self._call_service("/hand_eye_calibration/start_calibration")
 
     def _on_add_sample_clicked(self):
         """添加样本按钮回调。"""
