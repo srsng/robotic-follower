@@ -70,8 +70,7 @@ setup(
             "calibration_calculator=robotic_follower.ros_nodes.calibration.calculator_node:main",
             "calibration_result_manager=robotic_follower.ros_nodes.calibration.result_manager_node:main",
             "calibration_tf_publisher=robotic_follower.ros_nodes.calibration.tf_publisher_node:main",
-            # === 标定UI ===
-            "calibration_ui=robotic_follower.visualization.calibration_window:main",
+            "calibration_ui=robotic_follower.ros_nodes.calibration.calibration_ui_node:main",
         ],
     },
 )

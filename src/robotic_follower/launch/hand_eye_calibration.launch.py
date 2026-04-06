@@ -117,6 +117,14 @@ def generate_launch_description():
         ],
     )
 
+    # 8. 标定 info UI 窗口
+    calibration_ui_node = Node(
+        package="robotic_follower",
+        executable="calibration_ui",
+        name="calibration_ui",
+        output="screen",
+    )
+
     return LaunchDescription(
         [
             # 声明启动参数
@@ -131,5 +139,6 @@ def generate_launch_description():
             calculator_node,
             result_manager_node,
             tf_publisher_node,
+            calibration_ui_node,
         ]
     )

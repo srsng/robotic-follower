@@ -108,17 +108,26 @@ class CalibrationUIPanel:
 
         self.panel.add_child(gui.Label("-" * 24))
 
-        self.panel.add_child(gui.Label("Status:"))
+        # Status 行
+        status_row = gui.Horiz(0, gui.Margins(0, int(0.1 * self.em), 0, 0))
+        status_row.add_child(gui.Label("Status:"))
         self.status_label = gui.Label("Idle")
-        self.panel.add_child(self.status_label)
+        status_row.add_child(self.status_label)
+        self.panel.add_child(status_row)
 
-        self.panel.add_child(gui.Label("Samples:"))
+        # Samples 行
+        samples_row = gui.Horiz(0, gui.Margins(0, int(0.1 * self.em), 0, 0))
+        samples_row.add_child(gui.Label("Samples:"))
         self.sample_count_label = gui.Label("0 / 15 (min)")
-        self.panel.add_child(self.sample_count_label)
+        samples_row.add_child(self.sample_count_label)
+        self.panel.add_child(samples_row)
 
-        self.panel.add_child(gui.Label("Error:"))
+        # Error 行
+        error_row = gui.Horiz(0, gui.Margins(0, int(0.1 * self.em), 0, 0))
+        error_row.add_child(gui.Label("Error:"))
         self.error_label = gui.Label("N/A")
-        self.panel.add_child(self.error_label)
+        error_row.add_child(self.error_label)
+        self.panel.add_child(error_row)
 
         self.panel.add_child(gui.Label("-" * 24))
 
