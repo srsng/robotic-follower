@@ -16,6 +16,7 @@ class Detector3D:
         device: str = "cuda:0",
         score_threshold: float = 0.3,
         detector_type: str = "mmdet3d",
+        node: "rclpy.node.Node" = None,
     ):
         """
         初始化 3D 检测器。
@@ -26,6 +27,7 @@ class Detector3D:
             device: 设备 ('cuda:0' 或 'cpu')
             score_threshold: 检测置信度阈值
             detector_type: 检测器类型 ('mmdet3d', 'dspdet3d')
+            node: ROS2 节点实例，用于日志输出
         """
         self.config_file = os.path.expanduser(config_file)
         self.checkpoint_file = os.path.expanduser(checkpoint_file)
@@ -33,19 +35,23 @@ class Detector3D:
         self.score_threshold = score_threshold
         self.detector_type = detector_type
         self.model = None
+        self.node = node
 
         self._load_model()
 
     def _load_model(self):
         """加载 MMDetection3D 模型。"""
-        # 检查权重文件是否存在
-        if not self.checkpoint_file:
-            print("警告：未配置模型权重文件")
+        logger = self.node.get_logger() if self.node else None
+
+        if not os.path.exists(self.config_file):
+            msg = f"警告：模型config文件不存在: {self.config_file}"
+            (logger.error if logger else print)(msg)
             self.model = None
             return
 
         if not os.path.exists(self.checkpoint_file):
-            print(f"警告：模型文件不存在: {self.checkpoint_file}")
+            msg = f"警告：模型权重文件不存在: {self.checkpoint_file}"
+            (logger.error if logger else print)(msg)
             self.model = None
             return
 
@@ -54,12 +60,15 @@ class Detector3D:
 
             config = self.config_file if self.config_file else None
             self.model = init_model(config, self.checkpoint_file, device=self.device)
-            print(f"✓ 成功加载 3D 检测模型: {self.checkpoint_file}")
+            msg = f"成功加载 3D 检测模型: {self.checkpoint_file}"
+            (logger.info if logger else print)(msg)
         except ImportError as e:
-            print(f"警告：MMDetection3D 模块导入失败: {e}")
+            msg = f"警告：MMDetection3D 模块导入失败: {e}"
+            (logger.error if logger else print)(msg)
             self.model = None
         except Exception as e:
-            print(f"警告：模型加载失败: {e}")
+            msg = f"警告：模型加载失败: {e}"
+            (logger.error if logger else print)(msg)
             self.model = None
 
     def detect(self, points: np.ndarray) -> list[dict]:
@@ -111,7 +120,11 @@ class Detector3D:
             return detections
 
         except Exception as e:
-            print(f"检测失败: {e}")
+            msg = f"检测失败: {e}"
+            if self.node:
+                self.node.get_logger().error(msg)
+            else:
+                print(msg)
             return []
 
     def _parse_mmdet3d_result(self, result) -> list[dict]:
@@ -163,22 +176,26 @@ class Detector3D:
         ]
 
 
-def create_detector_from_config(config: dict) -> Detector3D:
+def create_detector_from_config(
+    config: dict, node: "rclpy.node.Node" = None
+) -> Detector3D:
     """
     从配置字典创建检测器。
 
     Args:
         config: 配置字典
+        node: ROS2 节点实例，用于日志输出
 
     Returns:
         Detector3D 实例
     """
     detector_type = config.get("type", "mmdet3d")
-
+    
     return Detector3D(
         config_file=config["config_file"],
         checkpoint_file=config["checkpoint_file"],
         device=config.get("device", "cuda:0"),
         score_threshold=config.get("score_threshold", 0.3),
         detector_type=detector_type,
+        node=node,
     )

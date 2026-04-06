@@ -134,6 +134,16 @@ class DetectionNode(Node):
             self.get_logger().error("配置文件中无 detector 配置")
             return
 
+        must_keys = ("config_file", "checkpoint_file")
+        miss_key = False
+        for i in must_keys:
+            if i not in detector_config:
+                self.get_logger().error(f"检测模型未加载: 配置缺失 {i} 项")
+                miss_key = True
+        if miss_key:
+            self.get_logger().error(f"检测模型未加载: 请修复配置缺失项")
+            return
+        
         detector_config["config_file"] = os.path.expanduser(
             detector_config["config_file"]
         )
@@ -144,7 +154,7 @@ class DetectionNode(Node):
         self.get_logger().info(f"config_file: {detector_config['config_file']}")
         self.get_logger().info(f"checkpoint_file: {detector_config['checkpoint_file']}")
 
-        self.detector = create_detector_from_config(detector_config)
+        self.detector = create_detector_from_config(detector_config, node=self)
         if self.detector and self.detector.model is not None:
             self.get_logger().info("已加载检测模型")
         else:
