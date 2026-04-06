@@ -2,9 +2,11 @@
 
 # 3D 检测器配置
 detector:
-  name: 'VoteNet'
-  type: 'mmdet3d'
-  config_file: '~/ros2_ws/src/robotic_follower/model/detection/votenet/votenet_8xb16_sunrgbd-3d.py.py'
-  checkpoint_file: '~/ros2_ws/src/robotic_follower/model/detection/votenet/votenet_16x8_sunrgbd-3d-10class_20210820_162823-bf11f014.pth'
-  device: 'cuda:0'
+  name: VoteNet
+  type: mmdet3d
+  config_file: ~/ros2_ws/src/robotic_follower/model/detection/votenet/votenet_8xb16_sunrgbd-3d.py.py
+  checkpoint_file: ~/ros2_ws/src/robotic_follower/model/detection/votenet/votenet_16x8_sunrgbd-3d-10class_20210820_162823-bf11f014.pth
+  device: cuda:0
   score_threshold: 0.3
+  ignore_class_names:
+    - cabinet
