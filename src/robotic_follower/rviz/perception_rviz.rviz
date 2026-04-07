@@ -278,7 +278,7 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /camera/camera/depth/image_rect_raw
       Value: true
-    - Class: rviz_default_plugins/Marker
+    - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: Markers
       Namespace: ""
