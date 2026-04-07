@@ -75,7 +75,7 @@ def generate_launch_description():
             "enable_depth": "true",
             "depth_module.profile": "640x480x30",
             "rgb_camera.profile": "640x480x30",
-            "camera_namespace": "",
+            "camera_namespace": "camera",
         }.items(),
     )
 
