@@ -11,9 +11,6 @@
     ros2 launch robotic_follower hand_eye_calibration.launch.py
 """
 
-import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
@@ -30,6 +27,19 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             [FindPackageShare("dummy_moveit_config"), "/launch/demo_real_arm.launch.py"]
         )
+    )
+
+    # 1.5 启动机械臂控制器（必须在 MoveIt 之前启动，以便接收关节状态）
+    arm_controller_node = Node(
+        package="dummy_controller",
+        executable="dummy_arm_controller",
+        name="dummy_arm_controller",
+        output="screen",
+        parameters=[
+            {
+                "publish_rate": 100,
+            }
+        ],
     )
 
     # 2. RealSense 相机（写死参数：640x480x30、点云启用、对齐深度）
@@ -133,6 +143,7 @@ def generate_launch_description():
                 "use_sim_time", default_value="false", description="Use simulation time"
             ),
             # 启动组件
+            arm_controller_node,
             demo_arm_launch,
             realsense_launch,
             chessboard_pose_node,

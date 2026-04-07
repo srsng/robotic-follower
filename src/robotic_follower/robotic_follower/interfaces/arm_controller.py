@@ -18,6 +18,7 @@ from rclpy.action import ActionClient
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
+from std_srvs.srv import SetBool
 
 
 # 预定义的标定位姿序列（角度，度）
@@ -62,7 +63,7 @@ class ArmController:
             node: ROS2 节点
         """
         self.node = node
-        self.joint_names = ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Joint6"]
+        self.joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
 
         # 订阅关节状态
         self.joint_state_sub = node.create_subscription(
@@ -71,6 +72,17 @@ class ArmController:
 
         # MoveGroup action 客户端
         self.move_group_client = ActionClient(node, MoveGroup, "/move_action")
+
+        # 机械臂使能服务客户端
+        self.robot_enable_client = node.create_client(SetBool, "dummy_arm/enable")
+
+        # 夹爪使能服务客户端（用于在使能机械臂后取消夹爪使能）
+        self.gripper_enable_client = node.create_client(
+            SetBool, "dummy_arm/gripper_enable"
+        )
+
+        # 夹爪打开服务客户端
+        self.gripper_open_client = node.create_client(SetBool, "dummy_arm/gripper_open")
 
         # 等待服务
         self.node.get_logger().info("等待 MoveGroup action 服务...")
@@ -105,6 +117,58 @@ class ArmController:
                 return False
             time.sleep(0.1)
         return True
+
+    def enable_robot(self, timeout: float = 10.0) -> bool:
+        """使能机械臂。
+
+        Args:
+            timeout: 超时时间（秒）
+
+        Returns:
+            True if 使能成功
+        """
+        self.node.get_logger().info("请求使能机械臂...")
+        if not self.robot_enable_client.wait_for_service(timeout_sec=timeout):
+            self.node.get_logger().error("机械臂使能服务不可用")
+            return False
+
+        request = SetBool.Request()
+        request.data = True
+        future = self.robot_enable_client.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future, timeout_sec=timeout)
+
+        if future.result() is None:
+            self.node.get_logger().error("机械臂使能请求超时")
+            return False
+
+        response = future.result()
+        if response.success:
+            self.node.get_logger().info("机械臂使能成功")
+            # 显式关闭夹爪使能并打开夹爪，避免固件联动使能夹爪
+            try:
+                # 取消夹爪使能
+                if self.gripper_enable_client.wait_for_service(timeout_sec=2.0):
+                    gripper_req = SetBool.Request()
+                    gripper_req.data = False
+                    gripper_future = self.gripper_enable_client.call_async(gripper_req)
+                    rclpy.spin_until_future_complete(
+                        self.node, gripper_future, timeout_sec=2.0
+                    )
+                # 打开夹爪
+                if self.gripper_open_client.wait_for_service(timeout_sec=2.0):
+                    open_req = SetBool.Request()
+                    open_req.data = True
+                    open_future = self.gripper_open_client.call_async(open_req)
+                    rclpy.spin_until_future_complete(
+                        self.node, open_future, timeout_sec=2.0
+                    )
+                    self.node.get_logger().info("夹爪已打开")
+            except Exception as e:
+                self.node.get_logger().warn(f"夹爪控制异常（已忽略）: {e}")
+            return True
+
+        self.node.get_logger().error(f"机械臂使能失败: {response.message}")
+        return False
 
     def move_to_joints_deg(self, joints_deg: list, wait: bool = True) -> bool:
         """移动机械臂到指定关节角度（度）。

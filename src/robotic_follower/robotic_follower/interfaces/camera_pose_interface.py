@@ -85,7 +85,7 @@ class CameraPoseInterface:
             4x4 numpy 数组 (marker2camera)，或 None
         """
         pose = self.latest_pose
-        if pose is None:
+        if pose is None or not self._marker_detected:
             return None
 
         matrix = np.eye(4)
