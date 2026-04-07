@@ -1,0 +1,29 @@
+# 感知系统配置文件 - Density-aware VoteNet 模型
+
+# 3D 检测器配置
+detector:
+  name: Density VoteNet-TO-Scene
+  type: mmdet3d
+  config_file: ~/ros2_ws/src/robotic_follower/model/detection/density_votenet/density_votenet_to_scene-70c.py
+  checkpoint_file: ~/ros2_ws/src/robotic_follower/model/detection/density_votenet/density_votenet_to_scene-70c.pth
+  device: cuda:0
+  score_threshold: 0.5
+  ignore_class_names:
+  - bed
+  - cabinet
+  - chair
+  - sofa
+  - table
+  - door
+  - window
+  - bookshelf
+  - picture
+  - counter
+  - desk
+  - curtain
+  - refrigerator
+  - showercurtrain
+  - toilet
+  - sink
+  - bathtub
+  - garbagebin
