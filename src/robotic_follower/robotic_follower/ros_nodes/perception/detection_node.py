@@ -35,14 +35,19 @@ from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
 from vision_msgs.msg import Detection3D, Detection3DArray
 
-from robotic_follower.detection.inference.detector import create_detector_from_config
+from robotic_follower.detection.inference import create_from_config
 from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
 
 
 class DetectionNode(Node):
     """3D 目标检测节点。"""
 
-    DEFAULT_CONFIG = "~/ros2_ws/install/robotic_follower/share/robotic_follower/model/config/votenet_config.yaml"
+    # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/votenet_config.yaml"
+    DEFAULT_CONFIG = (
+        "~/ros2_ws/src/robotic_follower/model/config/density_votenet_config.yaml"
+    )
+    # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/density_votenet_config_mini.yaml"
+    # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/density_votenet_to_scene-70c.yaml"
 
     def __init__(self):
         super().__init__("detection_node")
@@ -77,7 +82,7 @@ class DetectionNode(Node):
         # 参数
         self.declare_parameter("config_file", self.DEFAULT_CONFIG)
 
-        config_file = os.path.expanduser(self.get_parameter("config_file").value)
+        config_file = os.path.expanduser(str(self.get_parameter("config_file").value))
         config_file = self._resolve_path(config_file)
 
         # 加载配置
@@ -134,28 +139,13 @@ class DetectionNode(Node):
             self.get_logger().error("配置文件中无 detector 配置")
             return
 
-        must_keys = ("config_file", "checkpoint_file")
-        miss_key = False
-        for i in must_keys:
-            if i not in detector_config:
-                self.get_logger().error(f"检测模型未加载: 配置缺失 {i} 项")
-                miss_key = True
-        if miss_key:
-            self.get_logger().error(f"检测模型未加载: 请修复配置缺失项")
+        if "type" not in detector_config:
+            self.get_logger().fatal("配置文件中无 type 定义")
             return
-        
-        detector_config["config_file"] = os.path.expanduser(
-            detector_config["config_file"]
-        )
-        detector_config["checkpoint_file"] = os.path.expanduser(
-            detector_config["checkpoint_file"]
-        )
 
-        self.get_logger().info(f"config_file: {detector_config['config_file']}")
-        self.get_logger().info(f"checkpoint_file: {detector_config['checkpoint_file']}")
+        self.detector = create_from_config(detector_config, parent_node=self)
 
-        self.detector = create_detector_from_config(detector_config, node=self)
-        if self.detector and self.detector.model is not None:
+        if self.detector is not None and self.detector.ready:
             self.get_logger().info("已加载检测模型")
         else:
             self.get_logger().error("检测模型未加载")
@@ -163,7 +153,7 @@ class DetectionNode(Node):
     def pointcloud_callback(self, msg: PointCloud2):
         """点云回调。"""
         self.get_logger().debug(f"收到点云消息: {msg.width * msg.height} 点")
-        if self.detector is None or self.detector.model is None:
+        if self.detector is None or not self.detector.ready:
             self.get_logger().warn("检测器未就绪")
             return
 
