@@ -12,14 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# from ament_ruff.main import main
 import pytest
-from ament_flake8.main import main_with_errors
 
 
-@pytest.mark.flake8
+@pytest.mark.ruff
 @pytest.mark.linter
-def test_flake8():
-    rc, errors = main_with_errors(argv=[])
-    assert rc == 0, "Found %d code style errors / warnings:\n" % len(
-        errors
-    ) + "\n".join(errors)
+def test_ruff():
+    """Run ruff as a pytest plugin."""
+    # 使用 pytest 的主函数，并通过 --ruff 参数来执行代码风格检查
+    # -q 参数用于安静模式，让输出更简洁
+    result_code = pytest.main(["--ruff", "-q", __file__])
+    assert result_code == 0, "Ruff linter found code style issues."
+
+
+# @pytest.mark.ruff
+# @pytest.mark.linter
+# def test_ruff():
+#     rc, errors = main(argv=[])
+#     assert rc == 0, "Found %d code style errors / warnings:\n" % len(
+#         errors
+#     ) + "\n".join(errors)
