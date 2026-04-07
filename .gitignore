@@ -9,6 +9,7 @@ __pycache__
 # BMad Method V6
 _bmad/
 _bmad-output/
+_bmad-trashcan/
 
 /src/hand_eye_calibration/
 /src/perception/
