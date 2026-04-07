@@ -4,7 +4,7 @@
 启动完整的手眼标定系统：
 1. 机械臂驱动 + MoveIt (demo_real_arm.launch.py)
 2. RealSense 相机 (写死参数)
-3. ArUco 标定板检测
+3. 棋盘格标定板检测 (GP290: 12x9, 单格2cm)
 4. 标定节点 (sampler/calculator/result_manager/tf_publisher)
 
 启动命令：
@@ -25,7 +25,7 @@ from launch import LaunchDescription
 def generate_launch_description():
     """生成手眼标定系统的 Launch 描述。"""
 
-    # 1. Include demo_real_arm.launch.py (机械臂 + MoveIt + TF)
+    # 1. Include demo_real_arm.launch.py (MoveIt + RViz + TF，不包含机械臂控制器)
     demo_arm_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             [FindPackageShare("dummy_moveit_config"), "/launch/demo_real_arm.launch.py"]
@@ -48,18 +48,19 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 3. ArUco 标定板检测节点
-    aruco_params = os.path.join(
-        get_package_share_directory("ros2_aruco"),
-        "config",
-        "aruco_realsense_parameters.yaml",
-    )
-    aruco_node = Node(
-        package="ros2_aruco",
-        executable="aruco_node",
-        name="aruco_node",
-        parameters=[aruco_params],
+    # 3. 棋盘格标定板检测节点 (GP290: 12x9, 单格2cm)
+    chessboard_pose_node = Node(
+        package="robotic_follower",
+        executable="chessboard_pose",
+        name="chessboard_pose_node",
         output="screen",
+        parameters=[
+            {
+                "chessboard_cols": 11,
+                "chessboard_rows": 8,
+                "square_size": 0.02,
+            }
+        ],
     )
 
     # 4. 标定采样节点
@@ -134,7 +135,7 @@ def generate_launch_description():
             # 启动组件
             demo_arm_launch,
             realsense_launch,
-            aruco_node,
+            chessboard_pose_node,
             sampler_node,
             calculator_node,
             result_manager_node,

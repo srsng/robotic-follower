@@ -71,6 +71,7 @@ setup(
             "calibration_result_manager=robotic_follower.ros_nodes.calibration.result_manager_node:main",
             "calibration_tf_publisher=robotic_follower.ros_nodes.calibration.tf_publisher_node:main",
             "calibration_ui=robotic_follower.ros_nodes.calibration.calibration_ui_node:main",
+            "chessboard_pose=robotic_follower.ros_nodes.calibration.chessboard_pose_node:main",
         ],
     },
 )

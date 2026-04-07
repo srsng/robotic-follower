@@ -9,8 +9,8 @@
 采集到足够样本后自动执行标定计算。
 
 订阅话题：
-    - /aruco_markers (ros2_aruco_interfaces/ArucoMarkers)
-        ArUco 标定板检测结果
+    - /chessboard_pose (geometry_msgs/PoseStamped)
+        棋盘格标定板位姿（GP290: 12x9, 单格2cm）
 
 发布话题：
     - /hand_eye_calibration/calibration_sample (std_msgs/String)
@@ -49,7 +49,7 @@ from rclpy.node import Node
 from robotic_follower.interfaces import (
     CALIBRATION_POSES_DEG,
     ArmController,
-    CameraPoseInterface,
+    ChessboardPoseInterface,
     RobotPoseInterface,
 )
 
@@ -142,7 +142,7 @@ class CalibrationSamplerNode(Node):
             self.get_logger().info("PyMoveIt2 初始化成功")
 
             self.robot_pose = RobotPoseInterface(self.moveit2)
-            self.camera_pose = CameraPoseInterface(self, marker_id=0)
+            self.camera_pose = ChessboardPoseInterface(self)
             self.arm_controller = ArmController(self)
 
             # 等待关节状态
@@ -189,6 +189,10 @@ class CalibrationSamplerNode(Node):
         self.sample_count = 0
         self.samples = []
         self.last_valid_robot_pose = None
+
+        # 确保机械臂已使能
+        if self.arm_controller is not None:
+            self.arm_controller.enable_robot(timeout=10.0)
 
         response.success = True
         response.message = f"开始标定采集，目标样本数: {self.min_samples}"
