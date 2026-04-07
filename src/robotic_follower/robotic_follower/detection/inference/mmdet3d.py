@@ -12,7 +12,7 @@ from robotic_follower.util.log import log
 from .__base__ import Detector
 
 
-class Detector3D(Detector):
+class Mmdet3dDetector(Detector):
     """3D 目标检测器封装（MMDetection3D）"""
 
     def __init__(
@@ -242,7 +242,7 @@ class Detector3D(Detector):
         cls,
         config: dict,
         parent_node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
-    ) -> "Detector3D | None":
+    ) -> "Mmdet3dDetector | None":
         """
         从配置字典创建检测器
 

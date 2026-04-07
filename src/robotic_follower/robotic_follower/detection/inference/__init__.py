@@ -3,13 +3,13 @@
 from robotic_follower.util.log import log
 
 from .__base__ import Detector
-from .detector import Detector3D
+from .mmdet3d import Mmdet3dDetector
 
 
 def create_from_config(
     config: dict,
     parent_node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
-) -> Detector3D | None:
+) -> Mmdet3dDetector | None:
     """
     从配置字典创建检测器
 
@@ -26,7 +26,7 @@ def create_from_config(
 
     match detector_type:
         case "mmdet3d":
-            return Detector3D.create_from_config(config, parent_node)
+            return Mmdet3dDetector.create_from_config(config, parent_node)
         case "algo":
             log("fatal", f"未实现的检测器type: {detector_type}", parent_node)
             return None
@@ -37,6 +37,6 @@ def create_from_config(
 
 __all__ = [
     "Detector",
-    "Detector3D",
+    "Mmdet3dDetector",
     "create_from_config",
 ]
