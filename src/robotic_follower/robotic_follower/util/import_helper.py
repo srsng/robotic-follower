@@ -3,6 +3,9 @@ from pathlib import Path
 
 
 def load_var_from_file(file_path, var_name: list[str]) -> dict:
+    if not str(file_path).endswith(".py"):
+        return {}
+
     file_path = Path(file_path).resolve()
     module_name = f"dynamic_module_{file_path.stem}"
 

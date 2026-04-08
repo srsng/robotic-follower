@@ -211,15 +211,28 @@ class Mmdet3dDetector(Detector):
         若config正常，则返回 True
         """
         must_keys = ("config_file", "checkpoint_file")
-        miss_key = False
+        err_ls = []
+
+        def fatal_cb(level, msg):
+            return err_ls.append(msg)
+
         for key in must_keys:
             if key not in config:
-                log("fatal", f"检测模型未加载: 配置缺失 {key} 项", parent_node)
-                miss_key = True
-        if miss_key:
-            log("error", "检测模型未加载: 请修复配置缺失项", parent_node)
-            return False
+                log(
+                    "fatal",
+                    f"检测模型未加载: 配置缺失 {key} 项",
+                    parent_node,
+                    call=fatal_cb,
+                )
 
+        if err_ls:
+            log(
+                "error",
+                "检测模型未加载: 请修复配置缺失项",
+                parent_node,
+                call=fatal_cb,
+            )
+            return False
         return True
 
     @classmethod
