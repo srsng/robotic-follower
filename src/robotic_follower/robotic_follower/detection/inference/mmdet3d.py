@@ -268,6 +268,7 @@ class Mmdet3dDetector(Detector):
         """
         if not cls._config_check(config, parent_node):
             return None
+        config = config.copy()
         cls._config_norm(config, parent_node)
 
         log("info", f"config_file: {config['config_file']}", parent_node)
