@@ -21,7 +21,7 @@ class Mmdet3dDetector(Detector):
         checkpoint_file: str,
         device: str = "cuda:0",
         score_threshold: float = 0.3,
-        detector_type: str = "mmdet3d",
+        detector_name: str | None = None,
         ignore_class_names: tuple[str] = tuple([]),
         node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
     ):
@@ -37,7 +37,9 @@ class Mmdet3dDetector(Detector):
             ignore_class_names: 忽略检测结果的类名
             node: ROS2 节点实例，用于日志输出
         """
-        super().__init__(detector_type=detector_type, parent_node=node)
+        super().__init__(
+            detector_type="mmdet3d", detector_name=detector_name, parent_node=node
+        )
 
         self.config_file = config_file
         self.checkpoint_file = checkpoint_file
@@ -282,7 +284,7 @@ class Mmdet3dDetector(Detector):
             checkpoint_file=config["checkpoint_file"],
             device=config.get("device", "cuda:0"),
             score_threshold=config.get("score_threshold", 0.3),
-            detector_type=config.get("type", "mmdet3d"),
+            detector_name=config.get("name", None),
             ignore_class_names=tuple(config.get("ignore_class_names", ())),
             node=parent_node,
         )

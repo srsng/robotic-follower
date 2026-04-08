@@ -1,17 +1,18 @@
 """目标检测器基类"""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import TypeVar
 
 import numpy as np
 
-from robotic_follower.util.log import log
+from robotic_follower.util.handler import NodeHandler
+from robotic_follower.util.log import LogCallback
 
 
 T = TypeVar("T", bound="Detector")
 
 
-class Detector(ABC):
+class Detector(NodeHandler):
     """目标检测器封装基类"""
 
     def __init__(
@@ -30,12 +31,11 @@ class Detector(ABC):
             # class_names: 目标检测支持的类的列表，有序
             parent_node: ROS2 节点实例，用于日志输出
         """
-        self.detector_name = (
-            detector_name if detector_name else f"Not named {detector_type} detector"
-        )
+        super().__init__(parent_node=parent_node)
+
+        self.detector_name = detector_name if detector_name else "Not named"
         self.detector_type = detector_type
         # self.class_names = class_names
-        self.parent_node = parent_node
 
         self._not_ready_reasons: list[str] = []
 
@@ -95,32 +95,25 @@ class Detector(ABC):
             - name: 类别名称
         """
 
-    @property
-    def logger(self):
-        """获取日志记录器"""
-        return self.parent_node.get_logger() if self.parent_node else None
+    def _log(
+        self,
+        level: str,
+        msg: str,
+        fmt: str | None = None,
+        call: LogCallback | None = None,
+    ):
+        """安全的日志输出：当有父节点时，使用父节点的日志函数，否则使用print
 
-    def _log(self, level: str, msg: str):
-        """安全的日志输出"""
+        Args:
+            level (str): 日志等级. Should be in ("debug", "info", "warn", "error", "fatal")
+            msg (str): 消息
+            fmt (str, optional): 没有父节点时print的格式化，0号位是level，1号位是msg. Defaults to "[{0}]: {1}".
+            call Callable[[Level, Msg], None] | None: 日志回调，两个参数分别是`level`, `msg`. Defaults to None.
+        """
         if level == "fatal":
             self._not_ready_reasons.append(msg)
-        fmt = f"[detector[{self.detector_name}]][{{0}}]: {{1}}"
-        log(level, msg, node=self.parent_node, fmt=fmt)
-
-    def _debug(self, msg: str):
-        self._log("debug", msg)
-
-    def _info(self, msg: str):
-        self._log("info", msg)
-
-    def _warn(self, msg: str):
-        self._log("warn", msg)
-
-    def _error(self, msg: str):
-        self._log("error", msg)
-
-    def _fatal(self, msg: str):
-        self._log("fatal", msg)
+        fmt = f"[detector-{self.detector_type}-{self.detector_name}][{{0}}]: {{1}}"
+        super()._log(level, msg, fmt=fmt, call=call)
 
     def _to_numpy(self, attr) -> np.ndarray:
         """安全提取numpy数组，处理tensor和numpy两种格式"""
