@@ -192,9 +192,11 @@ class Mmdet3dDetector(Detector):
             labels = self._to_numpy(result["labels_3d"])
 
         for bbox, score, label in zip(bboxes, scores, labels):
+            # MMDetection3D 输出的是底部中心格式，转换为几何中心
+            bbox_centered = self.bbox_bottom_to_center(self._to_numpy(bbox))
             detections.append(
                 {
-                    "bbox": bbox.tolist(),  # [x, y, z, dx, dy, dz, yaw]
+                    "bbox": bbox_centered.tolist(),  # [x, y, z, dx, dy, dz, yaw]
                     "score": float(score),
                     "label": int(label),
                 }

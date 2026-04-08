@@ -43,9 +43,10 @@ class DetectionNode(Node):
     """3D 目标检测节点。"""
 
     # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/votenet_config.yaml"
-    DEFAULT_CONFIG = (
-        "~/ros2_ws/src/robotic_follower/model/config/density_votenet_config.yaml"
-    )
+    # DEFAULT_CONFIG = (
+    #     "~/ros2_ws/src/robotic_follower/model/config/density_votenet_config.yaml"
+    # )
+    DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/ground_cluster.yaml"
     # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/density_votenet_config_mini.yaml"
     # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/density_votenet_to_scene-70c.yaml"
 
@@ -109,7 +110,7 @@ class DetectionNode(Node):
 
         # 无检测器时定时打印错误
         self.error_timer = (
-            self.create_timer(1.0, self._print_error_if_no_detector)
+            self.create_timer(2.0, self._print_error_if_no_detector)
             if self.detector is None or not self.detector.ready
             else None
         )
@@ -191,11 +192,8 @@ class DetectionNode(Node):
         for det in detections:
             detection = Detection3D()
             bbox = det["bbox"]
-            # 修复：mmdet3d 中 SUNRGBD 数据集的 z 坐标是底部中心，而 ROS2 Detection3D 和 Open3D 期望几何中心
-            # 因此需要将 z 加上高度的一半 (dz / 2)
-            detection.bbox.center.position = Point(
-                x=bbox[0], y=bbox[1], z=bbox[2] + bbox[5] / 2.0
-            )
+            # 所有检测器输出的 bbox 格式均为 [x, y, z, dx, dy, dz, yaw]，z 为几何中心
+            detection.bbox.center.position = Point(x=bbox[0], y=bbox[1], z=bbox[2])
             detection.bbox.size = Vector3(x=bbox[3], y=bbox[4], z=bbox[5])
             detection.bbox.center.orientation = self._yaw_to_quaternion(bbox[6])
 
