@@ -3,7 +3,9 @@
 通过 MoveGroup action 控制机械臂运动到指定关节角度。
 """
 
+import json
 import math
+import os
 import time
 from collections.abc import Callable
 
@@ -21,28 +23,37 @@ from std_msgs.msg import Header
 from std_srvs.srv import SetBool
 
 
-# 预定义的标定位姿序列（角度，度）
-CALIBRATION_POSES_DEG = [
-    [0, 0, 0, 0, 0, 0],  # home
-    [-18.90, -3.20, 41.33, -159.28, -39.21, -166.98],  # target1
-    [0, -36.04, -21.09, 0, -89.63, 0],  # view
-    [-12.09, -27.57, 57.24, -144.14, -35.39, -152.68],  # pre
-    [-68.25, -14.88, 66.72, -71.77, 76.99, -36.87],  # escape
-    [-33.87, 14.76, 36.59, -39.87, 59.11, -24.48],  # output
-    [-147.77, -19.41, -8.12, 159.16, 83.79, 151.15],  # preget
-    [-164.47, -34.70, 36.44, 168.89, 49.07, 159.27],  # get
-    [123.36, -27.37, 72.08, -93.87, 90.00, -44.41],  # put
-    [0, -60, -30, 0, -90, 0],  # 额外位姿1
-    [-45, -30, 45, -120, -45, -90],  # 额外位姿2
-    [45, -20, 30, -60, 30, -45],  # 额外位姿3
-    [-90, -45, 60, -90, 60, -135],  # 额外位姿4
-    [30, -45, -30, 90, -60, 45],  # 额外位姿5
-    [-60, -20, 20, -45, 45, -60],  # 额外位姿6
-    [0, -90, 0, 0, -90, 0],  # 额外位姿7
-    [60, -30, 45, -150, 30, -30],  # 额外位姿8
-    [-30, -60, 30, -30, 60, -90],  # 额外位姿9
-    [0, -45, -45, 0, -90, 0],  # 额外位姿10
-]
+def _load_calibration_poses_from_targets() -> list:
+    """从 targets.json 加载 p1~p15 标定位姿。
+
+    Returns:
+        标定位姿列表，每个元素为 6 个关节角度（度）的列表
+    """
+    # targets.json 位于 ros2_dummy_arm_810 包中
+    package_share = os.path.expanduser("~/ros2_ws/src/ros2_dummy_arm_810")
+    targets_path = os.path.join(package_share, "targets.json")
+
+    if not os.path.exists(targets_path):
+        raise FileNotFoundError(f"targets.json 不存在: {targets_path}")
+
+    with open(targets_path) as f:
+        targets = json.load(f)
+
+    poses = []
+    for i in range(1, 16):  # p1 ~ p15
+        key = f"p{i}"
+        if key not in targets:
+            raise ValueError(f"targets.json 中未找到 {key}")
+        joints = targets[key].get("joints", [])
+        if len(joints) != 6:
+            raise ValueError(f"{key} joints 长度不为 6: {joints}")
+        poses.append(joints)
+
+    return poses
+
+
+# 预定义的标定位姿序列（角度，度），从 targets.json 加载 p1~p15
+CALIBRATION_POSES_DEG = _load_calibration_poses_from_targets()
 
 
 class ArmController:
@@ -92,6 +103,41 @@ class ArmController:
             self.node.get_logger().info("MoveGroup action 服务已连接")
 
         self.current_joint_positions = None
+
+        # 添加地面障碍物
+        self.run_add_obstacles()
+
+    def run_add_obstacles(self) -> None:
+        """添加地面障碍物到 MoveIt planning scene。
+
+        地面以世界原点为中心，边长5m的矩形，厚度0.01m。
+        """
+        try:
+            import os
+            import subprocess
+
+            self.node.get_logger().info("⛳ 正在添加地面障碍物...")
+
+            ws_path = os.path.expanduser("~/ros2_ws")
+            script_path = os.path.join(
+                os.path.dirname(__file__), "../script/add_ground_obstacle.py"
+            )
+
+            subprocess.run(
+                [
+                    "bash",
+                    "-lc",
+                    f"cd {ws_path} && source install/setup.bash >/dev/null 2>&1 && "
+                    f"python3 {script_path}",
+                ],
+                check=False,
+                timeout=15,
+            )
+
+            self.node.get_logger().info("✅ 地面障碍物添加完成")
+
+        except Exception as e:
+            self.node.get_logger().warn(f"❌ 添加地面障碍失败: {e}")
 
     def _joint_state_callback(self, msg: JointState) -> None:
         """接收关节状态更新。
