@@ -9,6 +9,27 @@ LogCallback = Callable[[Level, Msg], None]
 DEFAUL_FMT = "[{0}]: {1}"
 
 
+def _log_by_print(
+    level: str,
+    msg: str,
+    node: "rclpy.node.Node" = None,  # type: ignore # noqa: F821
+    fmt: str | None = "[{0}]: {1}",
+):
+    """log的辅助函数"""
+    try:
+        if fmt is None:
+            fmt = DEFAUL_FMT
+        msg_fmt = fmt.format(level.upper(), msg)
+    except (KeyError, IndexError):
+        log("warn", f"[log]日志格式化错误: `{fmt}`", node=node)
+        msg_fmt = DEFAUL_FMT.format(level.upper(), msg)
+
+    print(
+        msg_fmt,
+        file=__import__("sys").stderr if level in ("error", "fatal") else None,
+    )
+
+
 def log(
     level: str,
     msg: str,
@@ -34,18 +55,7 @@ def log(
     if logger and level_ok:
         getattr(logger, level)(msg)
     else:
-        try:
-            if fmt is None:
-                fmt = DEFAUL_FMT
-            msg_fmt = fmt.format(level.upper(), msg)
-        except (KeyError, IndexError):
-            log("warn", f"[log]日志格式化错误: `{fmt}`", node=node)
-            msg_fmt = DEFAUL_FMT.format(level.upper(), msg)
-
-        print(
-            msg_fmt,
-            file=__import__("sys").stderr if level in ("error", "fatal") else None,
-        )
+        _log_by_print(level, msg, node, fmt)
 
     if call is not None:
         call(Level(level), Msg(msg))
