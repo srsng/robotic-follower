@@ -115,7 +115,7 @@ ros2 node info /node_name
 
 - 使用 PEP 8 编码规范
 - 使用类型注解（Type Hints）
-- 使用 docstring 文档字符串
+- 使用 docstring 文档字符串, 避免使用中文标点符号
 - 使用 `rclpy` 编写 ROS2 节点
 
 ```python
