@@ -44,7 +44,7 @@ def numpy_to_pointcloud2(
     将 NumPy 点云转换为 ROS2 PointCloud2 消息。
 
     Args:
-        points: 点云数组 (N, 3) 或 (N, 4)，列为 [x, y, z] 或 [x, y, z, density/rgb]
+        points: 点云数组 (N, 3) 或 (N, 4)，列为 [x, y, z] 或 [x, y, z, rgb]
         frame_id: 坐标系 ID
         stamp: 时间戳（可选）
         pack_rgb: 是否将 RGB 打包为单个 float32 字段（兼容 RViz RGB8 颜色变换）
@@ -66,18 +66,6 @@ def numpy_to_pointcloud2(
             PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
         ]
         point_step = 12
-        msg.data = points.astype(np.float32).tobytes()
-    elif points.shape[1] == 4:
-        # XYZ + Intensity/Density
-        fields = [
-            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
-            PointField(
-                name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
-            ),
-        ]
-        point_step = 16
         msg.data = points.astype(np.float32).tobytes()
     elif points.shape[1] == 6:
         # XYZ + RGB

@@ -35,12 +35,6 @@
         直通滤波最小值（米）
     - passthrough_max (float, 默认 2.0)
         直通滤波最大值（米）
-    - density_bandwidth (float, 默认 0.05)
-        密度核带宽
-    - density_kernel (string, 默认 "gaussian")
-        密度核类型
-    - use_inverse_density (bool, 默认 True)
-        使用逆密度
     - enable_color (bool, 默认 True)
         使用 RGB 图像给点云染色
 """
@@ -51,7 +45,6 @@ from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
-from robotic_follower.point_cloud.features.density import DensityCalculator
 from robotic_follower.point_cloud.filters.filters import create_default_filter_pipeline
 from robotic_follower.point_cloud.io.converters import (
     depth_to_pointcloud,
@@ -74,11 +67,6 @@ class PointCloudProcessorNode(Node):
         self.declare_parameter("passthrough_min", 0.3)
         self.declare_parameter("passthrough_max", 2.0)
 
-        # 密度参数
-        self.declare_parameter("density_bandwidth", 0.05)
-        self.declare_parameter("density_kernel", "gaussian")
-        self.declare_parameter("use_inverse_density", True)
-
         # 染色参数
         self.declare_parameter("enable_color", True)
 
@@ -100,19 +88,6 @@ class PointCloudProcessorNode(Node):
         }
         self.filter_pipeline = create_default_filter_pipeline(filter_config)
 
-        # 创建密度计算器
-        density_config = {
-            "bandwidth": self.get_parameter("density_bandwidth").value,
-            "kernel": self.get_parameter("density_kernel").value,
-            "normalize": True,
-        }
-        self.density_calculator = DensityCalculator(
-            bandwidth=density_config["bandwidth"],
-            kernel=density_config["kernel"],
-            normalize=density_config["normalize"],
-        )
-
-        self.use_inverse_density = self.get_parameter("use_inverse_density").value
         self.enable_color = self.get_parameter("enable_color").value
 
         # 订阅话题
