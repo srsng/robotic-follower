@@ -58,7 +58,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 3. 棋盘格标定板检测节点 (GP290: 12x9, 单格2cm)
+    # 3. 棋盘格标定板检测节点 (GP290: 12x9格子, 单格2cm)
     chessboard_pose_node = Node(
         package="robotic_follower",
         executable="chessboard_pose",
@@ -143,8 +143,8 @@ def generate_launch_description():
                 "use_sim_time", default_value="false", description="Use simulation time"
             ),
             # 启动组件
-            arm_controller_node,
             demo_arm_launch,
+            arm_controller_node,
             realsense_launch,
             chessboard_pose_node,
             sampler_node,
