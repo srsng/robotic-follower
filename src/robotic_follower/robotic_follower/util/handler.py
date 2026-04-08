@@ -10,7 +10,10 @@ T = TypeVar("T", bound="NodeHandler")
 
 
 class NodeHandler(ABC):
-    """ROS Node 业务核心封装基类"""
+    """ROS Node 业务核心封装基类
+
+    封装通用日志方法
+    """
 
     def __init__(
         self,
