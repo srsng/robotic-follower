@@ -4,14 +4,17 @@ from typing import NewType
 
 Msg = NewType("Msg", str)
 Level = NewType("Level", str)
+LogCallback = Callable[[Level, Msg], None]
+
+DEFAUL_FMT = "[{0}]: {1}"
 
 
 def log(
     level: str,
     msg: str,
     node: "rclpy.node.Node" = None,  # type: ignore # noqa: F821
-    fmt="[{0}]: {1}",
-    call: Callable[[Level, Msg], None] | None = None,
+    fmt: str | None = "[{0}]: {1}",
+    call: LogCallback | None = None,
 ):
     """安全的日志输出：当有父节点时，使用父节点的日志函数，否则使用print
 
@@ -32,10 +35,12 @@ def log(
         getattr(logger, level)(msg)
     else:
         try:
+            if fmt is None:
+                fmt = DEFAUL_FMT
             msg_fmt = fmt.format(level.upper(), msg)
         except (KeyError, IndexError):
             log("warn", f"[log]日志格式化错误: `{fmt}`", node=node)
-            msg_fmt = f"[{level.upper()}]: {msg}"
+            msg_fmt = DEFAUL_FMT.format(level.upper(), msg)
 
         print(
             msg_fmt,
