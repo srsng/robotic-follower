@@ -110,7 +110,7 @@ class DetectionNode(Node):
         # 无检测器时定时打印错误
         self.error_timer = (
             self.create_timer(1.0, self._print_error_if_no_detector)
-            if self.detector is None or self.detector.model is None
+            if self.detector is None or not self.detector.ready
             else None
         )
 
@@ -118,7 +118,7 @@ class DetectionNode(Node):
 
     def _print_error_if_no_detector(self):
         """无检测器时打印错误。"""
-        if self.detector is None or self.detector.model is None:
+        if self.detector is None or not self.detector.ready:
             self.get_logger().error("检测器未加载，无法执行检测")
 
     def _resolve_path(self, path: str) -> str:
