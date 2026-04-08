@@ -1,0 +1,43 @@
+# 感知系统配置文件 - 地面物体聚簇检测
+
+detector:
+  name: ground_cluster_detector
+  type: algo
+
+  # 全局参数
+  global_params:
+    max_distance: 1.5  # 点云滤波距离 (m)
+    ground_percentile: 0.01  # 地面高度计算：最低 1% 的点
+    ground_threshold_percent: 0.08  # 地面阈值 = (z_max - z_min) * ground_threshold_percent
+
+  # 预处理阶段
+  pre_process:
+    # - type: radius_filter
+    #   enabled: true
+    #   params:
+    #     max_distance: ${max_distance}
+    #     min_distance: 0.0
+
+    - type: ground_estimation
+      enabled: true
+      params:
+        percentile: ${ground_percentile}
+
+  # 算法阶段
+  algorithm:
+    # 地面检测
+    - type: ground_detector
+      params:
+        threshold_percent: ${ground_threshold_percent}
+        percentile: ${ground_percentile}
+
+    # 欧式聚簇（处理剩余非地面点，归为 others）
+    - type: euclidean_cluster
+      params:
+        tolerance: 0.15  # 聚类容差 (m)
+        min_cluster_size: 10  # 最小簇点数
+        min_neighbors: 3
+
+  # 后处理阶段
+  post_process:
+    - type: compute_bbox
