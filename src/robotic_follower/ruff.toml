@@ -38,6 +38,11 @@ ignore = [
     "RUF022",     # `__all__` is not sorted
 ]
 
+# 排除路径
+exclude = [
+    "model/**/*.py"
+]
+
 [lint.per-file-ignores]
 # ROS2 节点文件
 "*/ros_nodes/*.py" = [
