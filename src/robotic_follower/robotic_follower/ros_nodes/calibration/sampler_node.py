@@ -38,6 +38,7 @@
 """
 
 import json
+import threading
 import time
 
 import numpy as np
@@ -47,7 +48,6 @@ import std_srvs.srv
 from rclpy.node import Node
 
 from robotic_follower.interfaces import (
-    CALIBRATION_POSES_DEG,
     ArmController,
     ChessboardPoseInterface,
     RobotPoseInterface,
@@ -77,11 +77,17 @@ class CalibrationSamplerNode(Node):
         self.position_threshold = self.get_parameter("position_threshold").value
         self.rotation_threshold = self.get_parameter("rotation_threshold").value
 
-        # 状态
-        self.state = "idle"  # idle, sampling, calibrating
-        self.sample_count = 0
-        self.samples = []
-        self.last_valid_robot_pose: np.ndarray | None = None
+        # 线程安全：保护共享状态
+        self._lock = threading.Lock()
+        self._state = "idle"  # idle, sampling, calibrating
+        self._sample_count = 0
+        self._samples: list[dict] = []
+        self._last_valid_robot_pose: np.ndarray | None = None
+
+        # 延迟导入标定位姿（避免模块级副作用）
+        from robotic_follower.interfaces import CALIBRATION_POSES_DEG
+
+        self._calibration_poses_deg = CALIBRATION_POSES_DEG
 
         # 初始化接口
         self._init_interfaces()
@@ -126,6 +132,50 @@ class CalibrationSamplerNode(Node):
 
         self.get_logger().info(f"标定采样节点已启动，目标样本数: {self.min_samples}")
 
+    @property
+    def state(self) -> str:
+        with self._lock:
+            return self._state
+
+    @state.setter
+    def state(self, value: str) -> None:
+        with self._lock:
+            self._state = value
+
+    @property
+    def sample_count(self) -> int:
+        with self._lock:
+            return self._sample_count
+
+    @sample_count.setter
+    def sample_count(self, value: int) -> None:
+        with self._lock:
+            self._sample_count = value
+
+    @property
+    def samples(self) -> list[dict]:
+        with self._lock:
+            return self._samples.copy()
+
+    @samples.setter
+    def samples(self, value: list[dict]) -> None:
+        with self._lock:
+            self._samples = value
+
+    @property
+    def last_valid_robot_pose(self) -> np.ndarray | None:
+        with self._lock:
+            return (
+                self._last_valid_robot_pose.copy()
+                if self._last_valid_robot_pose is not None
+                else None
+            )
+
+    @last_valid_robot_pose.setter
+    def last_valid_robot_pose(self, value: np.ndarray | None) -> None:
+        with self._lock:
+            self._last_valid_robot_pose = value.copy() if value is not None else None
+
     def _init_interfaces(self):
         """初始化 PyMoveIt2 和接口。"""
         try:
@@ -165,7 +215,11 @@ class CalibrationSamplerNode(Node):
             "max_samples": self.max_samples,
         }
         msg = std_msgs.msg.String()
-        msg.data = json.dumps(status)
+        try:
+            msg.data = json.dumps(status)
+        except (TypeError, ValueError) as e:
+            self.get_logger().warning(f"状态序列化失败: {e}")
+            return
         self.status_pub.publish(msg)
 
     def start_calibration_callback(
@@ -198,7 +252,6 @@ class CalibrationSamplerNode(Node):
         response.message = f"开始标定采集，目标样本数: {self.min_samples}"
 
         # 在新线程中执行采集
-        import threading
 
         thread = threading.Thread(target=self._calibration_loop)
         thread.daemon = True
@@ -219,6 +272,14 @@ class CalibrationSamplerNode(Node):
 
         self.get_logger().info(f"[INFO] 已停止采集，共采集 {self.sample_count} 个样本")
         self.state = "idle"
+
+        # 立即取消当前运动
+        if self.moveit2 is not None:
+            try:
+                self.moveit2.cancel_execution()
+                self.get_logger().info("已发送取消指令到 MoveIt")
+            except Exception as e:
+                self.get_logger().warn(f"取消运动失败: {e}")
 
         response.success = True
         response.message = f"已停止采集，共 {self.sample_count} 个样本"
@@ -260,11 +321,20 @@ class CalibrationSamplerNode(Node):
             # 等待稳定
             time.sleep(self.stable_wait)
 
-            # 尝试采集样本
-            if self._try_add_sample():
-                self.get_logger().info(f"[INFO] 已采集样本 #{self.sample_count}")
-            else:
-                self.get_logger().warn("样本无效或标定板未检测到")
+            # 尝试采集样本，失败则重试
+            max_retries = 2
+            retry_delay = 2.0
+            for attempt in range(max_retries + 1):
+                if self._try_add_sample():
+                    self.get_logger().info(f"[INFO] 已采集样本 #{self.sample_count}")
+                    return
+                if attempt < max_retries:
+                    self.get_logger().warn(
+                        f"样本无效或标定板未检测到，{retry_delay}s 后重试 ({attempt + 1}/{max_retries})..."
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    self.get_logger().warn(f"位姿 {pose_index + 1} 采样失败，跳过")
 
         # 执行位姿序列
         success_count = self.arm_controller.execute_calibration_poses(
@@ -272,11 +342,15 @@ class CalibrationSamplerNode(Node):
         )
 
         self.get_logger().info(
-            f"标定位姿序列执行完成，成功 {success_count}/{len(CALIBRATION_POSES_DEG)}"
+            f"标定位姿序列执行完成，成功 {success_count}/{len(self._calibration_poses_deg)}"
         )
 
-        # 检查是否需要重复采集
-        if self.sample_count < self.min_samples and self.state == "sampling":
+        # 重复采集直到达到最小样本数（受限于最大样本数）
+        while (
+            self.sample_count < self.min_samples
+            and self.sample_count < self.max_samples
+            and self.state == "sampling"
+        ):
             self.get_logger().info(
                 f"样本不足 ({self.sample_count}/{self.min_samples})，重复采集..."
             )
@@ -316,33 +390,34 @@ class CalibrationSamplerNode(Node):
             self.get_logger().warn("未检测到标定板")
             return False
 
-        # 检查位姿变化
-        if self.last_valid_robot_pose is not None:
-            pos_diff = np.linalg.norm(
-                robot_pose_matrix[:3, 3] - self.last_valid_robot_pose[:3, 3]
-            )
-            if pos_diff < self.position_threshold:
-                self.get_logger().warn(
-                    f"位置变化不足: {pos_diff:.3f}m < {self.position_threshold}m"
+        # 使用锁保护共享状态的读写
+        with self._lock:
+            # 检查位姿变化
+            if self._last_valid_robot_pose is not None:
+                pos_diff = np.linalg.norm(
+                    robot_pose_matrix[:3, 3] - self._last_valid_robot_pose[:3, 3]
                 )
-                return False
+                if pos_diff < self.position_threshold:
+                    self.get_logger().warn(
+                        f"位置变化不足: {pos_diff:.3f}m < {self.position_threshold}m"
+                    )
+                    return False
 
-        # 添加样本
-        sample = {
-            "sample_id": self.sample_count,
-            "robot_pose": robot_pose_matrix.flatten().tolist(),
-            "camera_pose": camera_pose_matrix.flatten().tolist(),
-            "timestamp": time.time(),
-        }
-        self.samples.append(sample)
+            # 添加样本
+            sample = {
+                "sample_id": self._sample_count,
+                "robot_pose": robot_pose_matrix.flatten().tolist(),
+                "camera_pose": camera_pose_matrix.flatten().tolist(),
+                "timestamp": time.time(),
+            }
+            self._samples.append(sample)
+            self._sample_count += 1
+            self._last_valid_robot_pose = robot_pose_matrix.copy()
 
-        # 发布样本（包装在 sample 字段中以匹配 calculator_node 期望的格式）
+        # 发布样本（不在线程锁内，避免阻塞）
         msg = std_msgs.msg.String()
         msg.data = json.dumps({"sample": sample})
         self.sample_pub.publish(msg)
-
-        self.sample_count += 1
-        self.last_valid_robot_pose = robot_pose_matrix.copy()
 
         return True
 
