@@ -1,7 +1,6 @@
 """3D 目标检测推理模块（MMDetection3D 集成）"""
 
 import os
-import os.path as osp
 
 import numpy as np
 from mmdet3d.apis import inference_detector  # type: ignore
@@ -215,16 +214,14 @@ class Mmdet3dDetector(Detector):
     def _config_norm(
         cls,
         config: dict,
-        parent_node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
+        parent_node=None,
+        defaults=None,
+        path_keys=None,
     ):
-        """规范化检测器config的值 (in-place)
+        """规范化检测器config的值 (in-place)"""
 
-        1. 展开用户路径
-        """
         path_keys = ("config_file", "checkpoint_file")
-        for key in path_keys:
-            if key in config:
-                config[key] = osp.expanduser(config[key])
+        super()._config_norm(config, parent_node=parent_node, path_keys=path_keys)
 
     @classmethod
     def create_from_config(

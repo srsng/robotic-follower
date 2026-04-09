@@ -1,12 +1,12 @@
 """目标检测器基类"""
 
 from abc import abstractmethod
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import numpy as np
 
 from robotic_follower.util.handler import NodeHandler
-from robotic_follower.util.log import LogCallback
+from robotic_follower.util.log import LogCallback, log
 
 
 T = TypeVar("T", bound="Detector")
@@ -112,8 +112,38 @@ class Detector(NodeHandler):
         cls: type[T],
         config: dict,
         parent_node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
+        defaults: dict[str, Any] | None = None,
+        path_keys: tuple[str, ...] | None = None,
     ):
-        """规范化config的值 (in-place)"""
+        """规范化config的值 (in-place)
+
+        1. 设置没有的键为默认值
+        2. 规范路径 (展开用户路径)
+        """
+        _defaults = {
+            "ignore_class_names": (),
+            "name": f"det-{config.get('type')}",
+            "detector_name": f"det-{config.get('type')}",
+        }
+        # 合并默认值
+        if defaults:
+            for k, v in defaults:
+                _defaults[k] = v
+
+        # 设置默认值
+        for k, v in _defaults:
+            if not config.get(k):
+                config[k] = v
+
+        # 规范路径
+        if path_keys is not None:
+            import os.path as osp
+
+            for key in path_keys:
+                if key in config:
+                    config[key] = osp.expanduser(config[key])
+                else:
+                    log("warn", f"提供路径 {key} 键不存在", parent_node)
 
     @classmethod
     @abstractmethod

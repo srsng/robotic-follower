@@ -134,6 +134,8 @@ class AlgoDetector(Detector):
         Returns:
             规范化后的配置字典
         """
+        super()._config_norm(config)
+
         # 规范化 algorithm 字段：单个 dict 转为 list
         if "algorithm" in config and isinstance(config["algorithm"], dict):
             config["algorithm"] = [config["algorithm"]]
