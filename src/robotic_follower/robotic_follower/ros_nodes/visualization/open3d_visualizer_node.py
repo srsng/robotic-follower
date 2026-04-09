@@ -12,6 +12,7 @@
     - 目标类别和置信度标签显示
     - 实时数据更新（20Hz 刷新率）
     - 坐标系参考系显示
+    - 动态接收检测器类别信息
 
 订阅话题：
     - /camera/camera/depth/color/points (sensor_msgs/PointCloud2)
@@ -24,6 +25,8 @@
         深度图
     - /camera/color/camera_info (sensor_msgs/CameraInfo)
         相机内参（用于深度图转点云）
+    - /perception/class_names_info (std_msgs/String)
+        检测器类别信息（JSON 格式）
 
 GUI 布局：
     - 左侧 70%: 3D 点云场景（Open3D SceneWidget）
@@ -38,20 +41,23 @@ GUI 布局：
     - ROS2 运行在后台线程，GUI 运行在主线程
 """
 
+import json
 import threading
 import time
 
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
-from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
+from std_msgs.msg import String
 from vision_msgs.msg import Detection3DArray
 
 from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
+from robotic_follower.util.wrapper import NodeWrapper
+import contextlib
 
 
-class Open3DVisualizerNode(Node):
+class Open3DVisualizerNode(NodeWrapper):
     """Open3D 可视化节点。"""
 
     def __init__(self):
@@ -67,6 +73,11 @@ class Open3DVisualizerNode(Node):
         self.current_depth_image = None
         self.current_camera_info = None
         self.is_new_data = False
+
+        # 类别信息（从检测节点动态接收）
+        self.class_names = []
+        self.idx2class_name = {}
+        self._class_names_received = False
 
         # 订阅话题
         self.pc_sub = self.create_subscription(
@@ -84,8 +95,23 @@ class Open3DVisualizerNode(Node):
         self.info_sub = self.create_subscription(
             CameraInfo, "/camera/color/camera_info", self.camera_info_callback, 10
         )
+        self.class_names_sub = self.create_subscription(
+            String, "/perception/class_names_info", self.class_names_callback, 10
+        )
 
-        self.get_logger().info("Open3D 可视化节点已启动，等待数据...")
+        self._info("Open3D 可视化节点已启动，等待数据...")
+
+    def class_names_callback(self, msg: String):
+        """检测器类别信息回调。"""
+        try:
+            info = json.loads(msg.data)
+            with self.data_lock:
+                self.class_names = info.get("class_names", [])
+                self.idx2class_name = info.get("idx2class_name", {})
+                self._class_names_received = True
+            self._info(f"已接收类别信息: {self.class_names}")
+        except Exception as e:
+            self._error(f"类别信息解析失败: {e}")
 
     def pc_callback(self, msg: PointCloud2):
         """点云回调。"""
@@ -95,7 +121,7 @@ class Open3DVisualizerNode(Node):
                 self.current_points = points
                 self.is_new_data = True
         except Exception as e:
-            self.get_logger().error(f"点云解析失败: {e}")
+            self._error(f"点云解析失败: {e}")
 
     def img_callback(self, msg: Image):
         """RGB 图像回调。"""
@@ -105,7 +131,7 @@ class Open3DVisualizerNode(Node):
                 self.current_rgb_image = img
                 self.is_new_data = True
         except Exception as e:
-            self.get_logger().error(f"图像解析失败: {e}")
+            self._error(f"图像解析失败: {e}")
 
     def depth_callback(self, msg: Image):
         """深度图回调。"""
@@ -115,7 +141,7 @@ class Open3DVisualizerNode(Node):
                 self.current_depth_image = depth
                 self.is_new_data = True
         except Exception as e:
-            self.get_logger().error(f"深度图解析失败: {e}")
+            self._error(f"深度图解析失败: {e}")
 
     def camera_info_callback(self, msg: CameraInfo):
         """相机信息回调。"""
@@ -148,7 +174,7 @@ class Open3DVisualizerNode(Node):
                 self.current_detections = detections
                 self.is_new_data = True
         except Exception as e:
-            self.get_logger().error(f"检测结果解析失败: {e}")
+            self._error(f"检测结果解析失败: {e}")
 
     @staticmethod
     def _quaternion_to_yaw(q) -> float:
@@ -242,20 +268,6 @@ def main(args=None):
     is_camera_setup = False
     current_labels = []
 
-    # SUNRGBD 类别列表
-    class_names = [
-        "bed",
-        "table",
-        "sofa",
-        "chair",
-        "toilet",
-        "desk",
-        "dresser",
-        "night_stand",
-        "bookshelf",
-        "bathtub",
-    ]
-
     def update_gui():
         nonlocal is_camera_setup, current_labels
 
@@ -268,6 +280,8 @@ def main(args=None):
             rgb = node.current_rgb_image
             depth = node.current_depth_image
             cam_info = node.current_camera_info
+            class_names = list(node.class_names)
+            class_names_received = node._class_names_received
 
         if points is None:
             return
@@ -279,7 +293,7 @@ def main(args=None):
                 o3d_img = o3d.geometry.Image(rgb_vis)
                 image_widget.update_image(o3d_img)
             except Exception as e:
-                node.get_logger().error(f"RGB ImageWidget update failed: {e}")
+                node._error(f"RGB ImageWidget update failed: {e}")
 
         if depth is not None:
             try:
@@ -289,16 +303,14 @@ def main(args=None):
                 depth_o3d_img = o3d.geometry.Image(depth_colored)
                 depth_image_widget.update_image(depth_o3d_img)
             except Exception as e:
-                node.get_logger().error(f"Depth ImageWidget update failed: {e}")
+                node._error(f"Depth ImageWidget update failed: {e}")
 
         # 刷新 3D 场景
         widget3d.scene.clear_geometry()
 
         for lbl in current_labels:
-            try:
+            with contextlib.suppress(Exception):
                 widget3d.remove_3d_label(lbl)
-            except Exception:
-                pass
         current_labels.clear()
 
         detection_texts = []
@@ -333,11 +345,10 @@ def main(args=None):
             widget3d.scene.add_geometry(f"BBox_{i}", bbox_lineset, mat_bbox)
 
             label_idx = det.get("label", -1)
-            label_name = (
-                class_names[label_idx]
-                if 0 <= label_idx < len(class_names)
-                else f"Obj_{label_idx}"
-            )
+            if class_names_received and 0 <= label_idx < len(class_names):
+                label_name = class_names[label_idx]
+            else:
+                label_name = f"Obj_{label_idx}"
             score = det.get("score", 0.0)
             text = f"{label_name}: {score:.2f}"
             detection_texts.append(f"[{i + 1}] {label_name} ({score:.2f})")

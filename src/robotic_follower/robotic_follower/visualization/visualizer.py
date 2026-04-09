@@ -33,12 +33,24 @@ class DetectionVisualizer:
         calib_path: str | None = None,
         depth2img: np.ndarray | None = None,
         rgb_image_data: np.ndarray | None = None,
+        class_names: list[str] | None = None,
     ) -> int:
         """
         可视化点云和检测结果（使用新的 GUI 模块以支持 3D 文本标签）。
 
+        Args:
+            points: 点云数据 (N, 3) 或 (N, 6) 含颜色
+            detections: 检测结果列表
+            block: 是否阻塞等待用户交互
+            rgb_image_path: RGB 图像路径（可选）
+            calib_path: 相机标定文件路径（可选）
+            depth2img: 深度到图像的变换矩阵（可选）
+            rgb_image_data: RGB 图像数据（可选，优先级高于 rgb_image_path）
+            class_names: 类别名称列表（可选），用于显示目标类别名称。
+                如果为 None，则使用默认的 SUNRGBD 类别列表。
+
         Returns:
-            int: 0 表示正常关闭，-1 表示按下了“上一个”键(Left)，1 表示按下了“下一个”键(Right/Space)。
+            int: 0 表示正常关闭，-1 表示按下了"上一个"键(Left)，1 表示按下了"下一个"键(Right/Space)。
         """
         self.nav_action = 0  # 0=close/stay, -1=prev, 1=next
 
@@ -153,8 +165,9 @@ class DetectionVisualizer:
         # 设置可滚动区域的高度
         side_panel.add_child(scrollable_list)
 
-        # SUN-RGBD数据类别（示例，仅用于显示名称） TODO: 替换
-        class_names = [
+        # SUN-RGBD数据类别（默认，仅用于显示名称）
+        # 如果调用者提供了 class_names，则使用提供的；否则使用默认列表
+        _class_names = class_names or [
             "bed",
             "table",
             "sofa",
@@ -284,8 +297,8 @@ class DetectionVisualizer:
             # 添加 3D 文本标签
             label_idx = det.get("label", -1)
             label_name = (
-                class_names[label_idx]
-                if 0 <= label_idx < len(class_names)
+                _class_names[label_idx]
+                if 0 <= label_idx < len(_class_names)
                 else f"Obj_{label_idx}"
             )
             score = det.get("score", 0.0)
@@ -623,6 +636,7 @@ def visualize_detections(
     rgb_image_path: str | None = None,
     calib_path: str | None = None,
     depth2img: np.ndarray | None = None,
+    class_names: list[str] | None = None,
 ) -> int:
     """
     快速可视化函数。
@@ -635,11 +649,12 @@ def visualize_detections(
         rgb_image_path: RGB 图像路径（可选）
         calib_path: 相机标定文件路径（可选）
         depth2img: 深度到图像的变换矩阵（可选）
+        class_names: 类别名称列表（可选）
 
     Returns:
         int: 导航动作 (0: 退出, -1: 上一个, 1: 下一个)
     """
     visualizer = DetectionVisualizer(window_name)
     return visualizer.visualize(
-        points, detections, block, rgb_image_path, calib_path, depth2img
+        points, detections, block, rgb_image_path, calib_path, depth2img, class_names=class_names
     )
