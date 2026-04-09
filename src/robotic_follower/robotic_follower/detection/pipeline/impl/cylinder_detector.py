@@ -151,7 +151,7 @@ class CylinderDetector(AlgorithmStage):
             # 创建检测结果
             detection = self.make_detection(
                 points=inlier_points,
-                label=self.LABEL_OTHERS,
+                name="cylinder",
                 score=min(1.0, arc_angle / (np.pi * 2) * 2),
             )
             detection["axis_center"] = np.array([axis_xy[0], axis_xy[1], axis_z])
