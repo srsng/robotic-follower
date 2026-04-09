@@ -5,10 +5,12 @@
     ros2 run robotic_follower calibration_ui
 """
 
-import open3d.visualization.gui as gui
+import open3d.visualization.gui as gui  # type: ignore
 import rclpy
 from rclpy.node import Node
+
 from robotic_follower.calibration.ui.calibration_ui_panel import CalibrationUIPanel
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -16,7 +18,7 @@ def main(args=None):
 
     app = gui.Application.instance
     app.initialize()
-    
+
     window = app.create_window("Hand-Eye Calibration", 400, 500)
     panel = CalibrationUIPanel(
         parent_window=window, em=window.theme.font_size, node=node
@@ -24,7 +26,7 @@ def main(args=None):
     window.add_child(panel.panel)
 
     app.run()
-    
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

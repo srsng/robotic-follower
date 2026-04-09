@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
 
+import open3d.visualization.gui as gui  # type: ignore
 import std_msgs.msg
 import std_srvs.srv
 from rclpy.node import Node
-
-
-if TYPE_CHECKING:
-    import open3d.visualization.gui as gui
 
 
 class CalibrationUIPanel:
@@ -25,7 +21,6 @@ class CalibrationUIPanel:
             em: 字体大小基准值
             node: ROS2 节点（用于服务调用）
         """
-        import open3d.visualization.gui as gui
 
         self.window = parent_window
         self.em = em
@@ -97,14 +92,12 @@ class CalibrationUIPanel:
 
     def _create_header(self):
         """创建标题栏。"""
-        import open3d.visualization.gui as gui
 
         header = gui.Label("=== Hand-Eye Calibration ===")
         self.panel.add_child(header)
 
     def _create_status_section(self):
         """创建状态显示区。"""
-        import open3d.visualization.gui as gui
 
         self.panel.add_child(gui.Label("-" * 24))
 
@@ -133,7 +126,6 @@ class CalibrationUIPanel:
 
     def _create_button_section(self):
         """创建按钮区。"""
-        import open3d.visualization.gui as gui
 
         margin = int(0.25 * self.em)
 
@@ -229,8 +221,6 @@ class CalibrationUIPanel:
     def _status_callback(self, msg: std_msgs.msg.String):
         """处理标定状态更新。"""
         try:
-            import open3d.visualization.gui as gui
-
             status = json.loads(msg.data)
             gui.Application.instance.post_to_main_thread(
                 self.window, lambda: self._update_status(status)
@@ -241,8 +231,6 @@ class CalibrationUIPanel:
     def _result_callback(self, msg: std_msgs.msg.String):
         """处理标定结果更新。"""
         try:
-            import open3d.visualization.gui as gui
-
             result = json.loads(msg.data)
             gui.Application.instance.post_to_main_thread(
                 self.window, lambda: self._update_result(result)
