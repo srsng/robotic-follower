@@ -29,9 +29,11 @@
 
   <!-- 相机驱动 -->
   <depend>realsense2_camera</depend>
+  <exec_depend>realsense2_description</exec_depend>
 
   <!-- 机械臂 -->
   <depend>ros2_dummy_arm_810</depend>
+  <exec_depend>dummy-ros2_description</exec_depend>
   <depend>moveit_ros_planning_interface</depend>
 
   <!-- ArUco 标定板 -->
