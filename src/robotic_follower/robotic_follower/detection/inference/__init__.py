@@ -4,7 +4,6 @@ from robotic_follower.util.log import log
 
 from .__base__ import Detector
 from .algo import AlgoDetector
-from .ground_cluster_detector import GroundClusterDetector
 from .mmdet3d import Mmdet3dDetector
 
 
@@ -38,7 +37,7 @@ def create_from_config(
 
 __all__ = [
     "Detector",
-    "GroundClusterDetector",
+    "AlgoDetector",
     "Mmdet3dDetector",
     "create_from_config",
 ]

@@ -131,7 +131,7 @@ class Detector(NodeHandler):
                 _defaults[k] = v
 
         # 设置默认值
-        for k, v in _defaults:
+        for k, v in _defaults.items():
             if not config.get(k):
                 config[k] = v
 

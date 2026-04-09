@@ -39,7 +39,9 @@ from launch import LaunchDescription
 
 def to_urdf(xacro_path, parameters=None):
     """将 xacro 文件转换为 URDF 文件。"""
-    urdf_path = tempfile.mkstemp(prefix=f"{os.path.basename(xacro_path)}_")
+    urdf_path = tempfile.mktemp(
+        prefix=f"{os.path.basename(xacro_path)}_", suffix=".urdf"
+    )
     doc = xacro.process_file(xacro_path, mappings=parameters)
     out = xacro.open_output(urdf_path)
     out.write(doc.toprettyxml(indent="  "))  # type: ignore
