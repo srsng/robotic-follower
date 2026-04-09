@@ -93,6 +93,8 @@ def generate_launch_description():
                 "stable_wait": 1.0,
                 "position_threshold": 0.05,
                 "rotation_threshold": 5.0,
+                "max_retry_cycles": 3,
+                "retry_timeout": 120.0,
                 "use_sim_time": "$(var use_sim_time)",
             }
         ],
@@ -162,20 +164,20 @@ def generate_launch_description():
             use_sim_time_arg,
             # 核心组件（MoveIt + 机械臂控制器）
             demo_arm_launch,
-            # 等待 MoveIt 服务可用后再启动 arm_controller
+            # 等待 MoveIt 服务可用后再启动 arm_controller（增加延迟作为保底）
             TimerAction(
-                period=3.0,
+                period=5.0,
                 actions=[arm_controller_node],
             ),
             # 相机启动独立进行
             realsense_launch,
             # 等待机械臂控制器完全启动后再启动标定节点
             TimerAction(
-                period=5.0,
+                period=7.0,
                 actions=[chessboard_pose_node],
             ),
             TimerAction(
-                period=6.0,
+                period=10.0,
                 actions=[sampler_node],
             ),
             calculator_node,

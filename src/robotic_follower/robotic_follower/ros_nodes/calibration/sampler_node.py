@@ -74,6 +74,9 @@ class CalibrationSamplerNode(NodeWrapper):
         self.rotation_threshold = self.declare_and_get_parameter(
             "rotation_threshold", 5.0
         )
+        # 循环保护参数
+        self.max_retry_cycles = self.declare_and_get_parameter("max_retry_cycles", 3)
+        self.retry_timeout = self.declare_and_get_parameter("retry_timeout", 10.0)
 
         # 线程安全：保护共享状态
         self._lock = threading.Lock()
@@ -344,14 +347,28 @@ class CalibrationSamplerNode(NodeWrapper):
         )
 
         # 重复采集直到达到最小样本数（受限于最大样本数）
+        # 添加超时和重试次数保护，避免无限循环
+        retry_count = 0
+        loop_start_time = time.time()
         while (
             self.sample_count < self.min_samples
             and self.sample_count < self.max_samples
             and self.state == "sampling"
         ):
+            # 超时保护
+            if time.time() - loop_start_time > self.retry_timeout:
+                self._warn(f"采样超时 ({self.retry_timeout}s)，终止标定")
+                break
+
+            # 重试次数保护
+            if retry_count >= self.max_retry_cycles:
+                self._warn(f"已达最大重试次数 ({self.max_retry_cycles})，终止标定")
+                break
+
             self._info(
                 f"样本不足 ({self.sample_count}/{self.min_samples})，重复采集..."
             )
+            retry_count += 1
             time.sleep(2.0)
             self.arm_controller.execute_calibration_poses(
                 on_pose_reached=on_pose_reached, stable_wait=self.stable_wait
@@ -396,6 +413,20 @@ class CalibrationSamplerNode(NodeWrapper):
                 if pos_diff < self.position_threshold:
                     self._warn(
                         f"位置变化不足: {pos_diff:.3f}m < {self.position_threshold}m"
+                    )
+                    return False
+
+                # 检查旋转变化（使用旋转矩阵迹计算等效角度）
+                R_curr = robot_pose_matrix[:3, :3]
+                R_prev = self._last_valid_robot_pose[:3, :3]
+                trace_diff = np.trace(R_curr @ R_prev.T)
+                # clamp 避免数值误差导致 arccos 域外
+                rot_diff_rad = np.arccos(np.clip((trace_diff - 1) / 2, -1.0, 1.0))
+                rot_diff_deg = np.degrees(rot_diff_rad)
+
+                if rot_diff_deg < self.rotation_threshold:
+                    self._warn(
+                        f"旋转变化不足: {rot_diff_deg:.2f}deg < {self.rotation_threshold}deg"
                     )
                     return False
 

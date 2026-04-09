@@ -68,6 +68,14 @@ class TFPublisherNode(NodeWrapper):
         # 当前变换
         self.current_transform: geometry_msgs.msg.TransformStamped = None
 
+        # 标定完成前不发布 TF（门控）
+        self._publish_enabled = False
+
+        # 定时检查标定状态
+        self._status_check_timer = self.create_timer(
+            1.0, self._check_calibration_status
+        )
+
         # 定时发布
         timer_period = 1.0 / self.publish_rate
         self.timer = self.create_timer(timer_period, self.publish_transform)
@@ -112,6 +120,8 @@ class TFPublisherNode(NodeWrapper):
                             successful=False,
                             reason="translation must have 3 components",
                         )
+                    # 同步更新实例变量
+                    self.calibration_translation = list(param.value)
                     self.current_transform.transform.translation.x = param.value[0]
                     self.current_transform.transform.translation.y = param.value[1]
                     self.current_transform.transform.translation.z = param.value[2]
@@ -122,6 +132,8 @@ class TFPublisherNode(NodeWrapper):
                             successful=False,
                             reason="rotation must have 4 quaternion components",
                         )
+                    # 同步更新实例变量
+                    self.calibration_rotation = list(param.value)
                     self.current_transform.transform.rotation.x = param.value[0]
                     self.current_transform.transform.rotation.y = param.value[1]
                     self.current_transform.transform.rotation.z = param.value[2]
@@ -145,10 +157,26 @@ class TFPublisherNode(NodeWrapper):
         except Exception as e:
             self._warn(f"读取参数失败: {e}")
 
+    def _check_calibration_status(self):
+        """检查标定状态，更新发布门控。"""
+        try:
+            status_param = self.get_parameter(f"{self.config_namespace}.status")
+            if status_param.type_ == rclpy.Parameter.Type.STRING:
+                status = status_param.value
+                was_enabled = self._publish_enabled
+                self._publish_enabled = status == "calibrated"
+                if self._publish_enabled and not was_enabled:
+                    self._info("标定完成，开始发布 TF")
+                elif not self._publish_enabled and was_enabled:
+                    self._warn("标定状态变更，停止发布 TF")
+        except Exception:
+            pass  # 参数不存在时保持当前状态
+
     def publish_transform(self):
         """发布 TF 变换。"""
-        if self.calibration_status in ("idle", "failed", ""):
-            return  # 未标定，不发布 TF
+        # 门控：标定未完成时不发布 TF
+        if not self._publish_enabled:
+            return
 
         # 更新时间戳
         self.current_transform.header.stamp = self.get_clock().now().to_msg()
