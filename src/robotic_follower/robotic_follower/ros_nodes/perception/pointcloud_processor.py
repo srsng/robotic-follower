@@ -42,7 +42,6 @@
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
-from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
 from robotic_follower.point_cloud.filters.filters import create_default_filter_pipeline
@@ -51,9 +50,10 @@ from robotic_follower.point_cloud.io.converters import (
     extract_camera_intrinsics_from_msg,
 )
 from robotic_follower.point_cloud.io.ros_converters import numpy_to_pointcloud2
+from robotic_follower.util.wrapper import NodeWrapper
 
 
-class PointCloudProcessorNode(Node):
+class PointCloudProcessorNode(NodeWrapper):
     """点云处理器节点。"""
 
     def __init__(self):
@@ -106,25 +106,25 @@ class PointCloudProcessorNode(Node):
             PointCloud2, "/camera/camera/depth/color/points", 10
         )
 
-        self.get_logger().info("点云处理器节点已启动")
+        self._info("点云处理器节点已启动")
 
     def camera_info_callback(self, msg: CameraInfo):
         """相机内参回调。"""
         if self.camera_intrinsics is None:
             self.camera_intrinsics = extract_camera_intrinsics_from_msg(msg)
-            self.get_logger().info(f"已接收相机内参: {self.camera_intrinsics}")
+            self._info(f"已接收相机内参: {self.camera_intrinsics}")
 
     def rgb_callback(self, msg: Image):
         """RGB 图像回调。"""
         try:
             self.rgb_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except Exception as e:
-            self.get_logger().error(f"RGB 图像转换失败: {e}")
+            self._error(f"RGB 图像转换失败: {e}")
 
     def depth_callback(self, msg: Image):
         """深度图回调。"""
         if self.camera_intrinsics is None:
-            self.get_logger().warn("等待相机内参...")
+            self._warn("等待相机内参...")
             return
 
         try:
@@ -135,14 +135,14 @@ class PointCloudProcessorNode(Node):
             )
 
             if len(points) < 1000:
-                self.get_logger().warn("点云点数过少，跳过处理")
+                self._warn("点云点数过少，跳过处理")
                 return
 
             # 点云滤波
             filtered_points = self.filter_pipeline.filter(points)
 
             if len(filtered_points) < 50:
-                self.get_logger().warn("滤波后点数过少")
+                self._warn("滤波后点数过少")
                 return
 
             # 点云染色（如果有 RGB 图像）
@@ -174,7 +174,7 @@ class PointCloudProcessorNode(Node):
             self.pointcloud_pub.publish(pointcloud_msg)
 
         except Exception as e:
-            self.get_logger().error(f"点云处理失败: {e}")
+            self._error(f"点云处理失败: {e}")
 
 
 def main(args=None):
@@ -185,7 +185,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         if rclpy.ok():

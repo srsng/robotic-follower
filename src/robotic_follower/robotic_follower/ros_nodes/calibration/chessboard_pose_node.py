@@ -23,12 +23,13 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseStamped
-from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
 
+from robotic_follower.util.wrapper import NodeWrapper
 
-class ChessboardPoseNode(Node):
+
+class ChessboardPoseNode(NodeWrapper):
     """棋盘格位姿估计节点。
 
     使用 cv2.findChessboardCorners 和 cv2.solvePnP 估计标定板相对相机的位姿。
@@ -96,7 +97,7 @@ class ChessboardPoseNode(Node):
             10,
         )
 
-        self.get_logger().info(
+        self._info(
             f"ChessboardPoseNode 已启动 (cols={self.chessboard_cols}, "
             f"rows={self.chessboard_rows}, size={self.square_size}m)"
         )
@@ -109,7 +110,7 @@ class ChessboardPoseNode(Node):
     def _camera_info_timeout_callback(self) -> None:
         """检查相机内参是否收到，超时则警告。"""
         if not self._camera_info_received:
-            self.get_logger().error(
+            self._error(
                 "5s 内未收到相机内参 (/camera/color/camera_info)，请检查相机驱动是否正常发布 camera_info"
             )
         # 定时器只执行一次
@@ -142,7 +143,7 @@ class ChessboardPoseNode(Node):
         self.camera_matrix = np.array(msg.k).reshape(3, 3)
         self.dist_coeffs = np.array(msg.d) if msg.d else np.zeros(5)
         self._camera_info_received = True
-        self.get_logger().info("相机内参已获取")
+        self._info("相机内参已获取")
 
     def _image_callback(self, msg: Image) -> None:
         """处理图像，检测棋盘格并估计位姿。
@@ -152,14 +153,14 @@ class ChessboardPoseNode(Node):
         """
         if not self._camera_info_received:
             # todo: 只警告一次，避免日志刷屏
-            self.get_logger().warn("相机内参未收到，跳过图像处理")
+            self._warn("相机内参未收到，跳过图像处理")
             return
 
         try:
             # RealSense 发布 BGR8 格式
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except Exception as e:
-            self.get_logger().error(f"图像转换失败: {e}")
+            self._error(f"图像转换失败: {e}")
             return
 
         # 检测棋盘格角点
@@ -293,7 +294,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         rclpy.shutdown()

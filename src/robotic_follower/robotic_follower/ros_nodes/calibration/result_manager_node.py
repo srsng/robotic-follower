@@ -37,13 +37,14 @@ import numpy as np
 import rclpy
 import std_srvs.srv
 import yaml
-from rclpy.node import Node
 from rclpy.parameter import Parameter
 from scipy.spatial.transform import Rotation
 from std_msgs.msg import String
 
+from robotic_follower.util.wrapper import NodeWrapper
 
-class CalibrationResultManagerNode(Node):
+
+class CalibrationResultManagerNode(NodeWrapper):
     """结果管理节点。"""
 
     DEFAULT_RESULT_DIR = os.path.expanduser("~/.ros/hand_eye_calibration")
@@ -123,7 +124,7 @@ class CalibrationResultManagerNode(Node):
             if result:
                 self.set_result(result)
 
-        self.get_logger().info("结果管理节点已启动")
+        self._info("结果管理节点已启动")
 
     def publish_status(self):
         """发布状态。"""
@@ -146,7 +147,7 @@ class CalibrationResultManagerNode(Node):
                 self.save_to_file()
 
         except json.JSONDecodeError as e:
-            self.get_logger().error(f"结果 JSON 解析失败: {e}")
+            self._error(f"结果 JSON 解析失败: {e}")
 
     def set_result(self, data: dict):
         """设置当前结果并发布。"""
@@ -202,7 +203,7 @@ class CalibrationResultManagerNode(Node):
         ]
         self.set_parameters(params)
 
-        self.get_logger().info(f"标定结果已更新，误差: {data.get('error', 0):.6f}m")
+        self._info(f"标定结果已更新，误差: {data.get('error', 0):.6f}m")
 
     def save_to_file(self) -> bool:
         """保存结果到文件。"""
@@ -214,26 +215,26 @@ class CalibrationResultManagerNode(Node):
             with open(self.result_file, "w") as f:
                 yaml.dump(self.current_result, f, default_flow_style=False)
 
-            self.get_logger().info(f"结果已保存至 {self.result_file}")
+            self._info(f"结果已保存至 {self.result_file}")
             return True
         except Exception as e:
-            self.get_logger().error(f"保存失败: {e}")
+            self._error(f"保存失败: {e}")
             return False
 
     def load_from_file(self) -> dict | None:
         """从文件加载结果。"""
         try:
             if not os.path.exists(self.result_file):
-                self.get_logger().warn(f"结果文件不存在: {self.result_file}")
+                self._warn(f"结果文件不存在: {self.result_file}")
                 return None
 
             with open(self.result_file) as f:
                 result = yaml.safe_load(f)
 
-            self.get_logger().info(f"从 {self.result_file} 加载结果")
+            self._info(f"从 {self.result_file} 加载结果")
             return result
         except Exception as e:
-            self.get_logger().error(f"加载失败: {e}")
+            self._error(f"加载失败: {e}")
             return None
 
     def save_callback(
@@ -291,7 +292,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         rclpy.shutdown()

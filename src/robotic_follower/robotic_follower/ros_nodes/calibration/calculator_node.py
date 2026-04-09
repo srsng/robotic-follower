@@ -34,13 +34,13 @@ import json
 import numpy as np
 import rclpy
 import std_srvs.srv
-from rclpy.node import Node
 from std_msgs.msg import String
 
 from robotic_follower.calibration import ExtrinsicCalibrator
+from robotic_follower.util.wrapper import NodeWrapper
 
 
-class CalibrationCalculatorNode(Node):
+class CalibrationCalculatorNode(NodeWrapper):
     """标定计算节点。"""
 
     def __init__(self):
@@ -99,7 +99,7 @@ class CalibrationCalculatorNode(Node):
         # 状态发布定时器
         self.status_timer = self.create_timer(1.0, self.publish_status)
 
-        self.get_logger().info("标定计算节点已启动")
+        self._info("标定计算节点已启动")
 
     def sample_callback(self, msg: String):
         """处理标定样本。"""
@@ -107,14 +107,14 @@ class CalibrationCalculatorNode(Node):
             data = json.loads(msg.data)
             sample = data.get("sample")
             if sample is None:
-                self.get_logger().warn("样本消息中缺少 'sample' 字段")
+                self._warn("样本消息中缺少 'sample' 字段")
                 return
 
             robot_pose = sample.get("robot_pose")
             camera_pose = sample.get("camera_pose")
 
             if robot_pose is None or camera_pose is None:
-                self.get_logger().warn("样本缺少 robot_pose 或 camera_pose")
+                self._warn("样本缺少 robot_pose 或 camera_pose")
                 return
 
             # 转换为 numpy 数组
@@ -124,17 +124,17 @@ class CalibrationCalculatorNode(Node):
             # 添加到标定器
             if self.calibrator.add_sample(robot_pose_np, camera_pose_np):
                 self.samples.append(sample)
-                self.get_logger().info(
+                self._info(
                     f"收到样本 #{self.calibrator.sample_count}, "
                     f"误差阈值检查: {self.calibrator.sample_count >= self.min_samples}"
                 )
             else:
-                self.get_logger().warn("样本添加失败")
+                self._warn("样本添加失败")
 
         except json.JSONDecodeError as e:
-            self.get_logger().error(f"样本 JSON 解析失败: {e}")
+            self._error(f"样本 JSON 解析失败: {e}")
         except Exception as e:
-            self.get_logger().error(f"处理样本时出错: {e}")
+            self._error(f"处理样本时出错: {e}")
 
     def execute_callback(
         self,
@@ -149,25 +149,25 @@ class CalibrationCalculatorNode(Node):
             response.message = (
                 f"样本不足: {self.calibrator.sample_count}/{self.min_samples}"
             )
-            self.get_logger().warn(response.message)
+            self._warn(response.message)
             self.state = "idle"
             return response
 
         try:
             # 执行标定
-            self.get_logger().info("开始标定计算...")
+            self._info("开始标定计算...")
             result = self.calibrator.calibrate(method=self.method)
 
             # 验证结果
             validation = self.calibrator.validate(result)
             if not validation["passed"]:
-                self.get_logger().warn(
+                self._warn(
                     f"标定误差过大: {validation['error']:.6f}m > {validation['max_error']:.6f}m"
                 )
                 self.state = "failed"
             else:
                 self.state = "completed"
-                self.get_logger().info(f"标定完成，误差: {validation['error']:.6f}m")
+                self._info(f"标定完成，误差: {validation['error']:.6f}m")
 
             # 发布结果
             result_msg = String()
@@ -190,13 +190,13 @@ class CalibrationCalculatorNode(Node):
                 f"误差: {result['error']:.6f}m, "
                 f"样本数: {result['sample_count']}"
             )
-            self.get_logger().info(response.message)
+            self._info(response.message)
             return response
 
         except Exception as e:
             response.success = False
             response.message = f"标定失败: {e}"
-            self.get_logger().error(response.message)
+            self._error(response.message)
             self.state = "failed"
             return response
 
@@ -211,7 +211,7 @@ class CalibrationCalculatorNode(Node):
         self.state = "idle"
         response.success = True
         response.message = "标定数据已重置"
-        self.get_logger().info("标定数据已重置")
+        self._info("标定数据已重置")
         return response
 
     def publish_status(self):
@@ -234,7 +234,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         rclpy.shutdown()

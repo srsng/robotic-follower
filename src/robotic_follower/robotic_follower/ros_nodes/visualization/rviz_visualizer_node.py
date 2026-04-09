@@ -51,13 +51,14 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Point
-from rclpy.node import Node
 from sensor_msgs.msg import Image, PointCloud2
 from vision_msgs.msg import Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
 
+from robotic_follower.util.wrapper import NodeWrapper
 
-class RVizVisualizerNode(Node):
+
+class RVizVisualizerNode(NodeWrapper):
     """RViz 可视化节点 - 负责话题转发和数据格式转换。"""
 
     def __init__(self):
@@ -96,7 +97,7 @@ class RVizVisualizerNode(Node):
         )
         self.rgb_pub = self.create_publisher(Image, "/perception/rgb_display", 10)
 
-        self.get_logger().info("RViz 可视化节点已启动")
+        self._info("RViz 可视化节点已启动")
 
     def pointcloud_callback(self, msg: PointCloud2):
         """点云回调：将 r,g,b 转换为 rgb 打包格式供 RViz 显示。"""
@@ -296,7 +297,7 @@ class RVizVisualizerNode(Node):
             depth_msg.header = msg.header
             self.depth_pub.publish(depth_msg)
         except Exception as e:
-            self.get_logger().error(f"深度图伪彩色处理失败: {e}")
+            self._error(f"深度图伪彩色处理失败: {e}")
 
 
 def main(args=None):
@@ -307,7 +308,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         if rclpy.ok():

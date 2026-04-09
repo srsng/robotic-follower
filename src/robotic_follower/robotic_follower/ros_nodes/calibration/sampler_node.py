@@ -45,16 +45,16 @@ import numpy as np
 import rclpy
 import std_msgs.msg
 import std_srvs.srv
-from rclpy.node import Node
 
 from robotic_follower.interfaces import (
     ArmController,
     ChessboardPoseInterface,
     RobotPoseInterface,
 )
+from robotic_follower.util.wrapper import NodeWrapper
 
 
-class CalibrationSamplerNode(Node):
+class CalibrationSamplerNode(NodeWrapper):
     """标定采样节点。
 
     自动控制机械臂移动，采集 robot_pose 和 camera_pose 样本对。
@@ -130,7 +130,7 @@ class CalibrationSamplerNode(Node):
         # 状态发布定时器
         self.status_timer = self.create_timer(1.0, self._publish_status)
 
-        self.get_logger().info(f"标定采样节点已启动，目标样本数: {self.min_samples}")
+        self._info(f"标定采样节点已启动，目标样本数: {self.min_samples}")
 
     @property
     def state(self) -> str:
@@ -189,7 +189,7 @@ class CalibrationSamplerNode(Node):
                 end_effector_name=robot.end_effector_name(),
                 group_name=robot.MOVE_GROUP_ARM,
             )
-            self.get_logger().info("PyMoveIt2 初始化成功")
+            self._info("PyMoveIt2 初始化成功")
 
             self.robot_pose = RobotPoseInterface(self.moveit2)
             self.camera_pose = ChessboardPoseInterface(self)
@@ -197,10 +197,10 @@ class CalibrationSamplerNode(Node):
 
             # 等待关节状态
             self.arm_controller.wait_for_joint_state(timeout=5.0)
-            self.get_logger().info("接口初始化完成")
+            self._info("接口初始化完成")
 
         except ImportError as e:
-            self.get_logger().error(f"PyMoveIt2 导入失败: {e}")
+            self._error(f"PyMoveIt2 导入失败: {e}")
             self.moveit2 = None
             self.robot_pose = None
             self.camera_pose = None
@@ -218,7 +218,7 @@ class CalibrationSamplerNode(Node):
         try:
             msg.data = json.dumps(status)
         except (TypeError, ValueError) as e:
-            self.get_logger().warning(f"状态序列化失败: {e}")
+            self._warn(f"状态序列化失败: {e}")
             return
         self.status_pub.publish(msg)
 
@@ -238,7 +238,7 @@ class CalibrationSamplerNode(Node):
             response.message = "PyMoveIt2 未初始化"
             return response
 
-        self.get_logger().info(f"[INFO] 开始标定采集，目标样本数: {self.min_samples}")
+        self._info(f"[INFO] 开始标定采集，目标样本数: {self.min_samples}")
         self.state = "sampling"
         self.sample_count = 0
         self.samples = []
@@ -270,16 +270,16 @@ class CalibrationSamplerNode(Node):
             response.message = "已经在空闲状态"
             return response
 
-        self.get_logger().info(f"[INFO] 已停止采集，共采集 {self.sample_count} 个样本")
+        self._info(f"[INFO] 已停止采集，共采集 {self.sample_count} 个样本")
         self.state = "idle"
 
         # 立即取消当前运动
         if self.moveit2 is not None:
             try:
                 self.moveit2.cancel_execution()
-                self.get_logger().info("已发送取消指令到 MoveIt")
+                self._info("已发送取消指令到 MoveIt")
             except Exception as e:
-                self.get_logger().warn(f"取消运动失败: {e}")
+                self._warn(f"取消运动失败: {e}")
 
         response.success = True
         response.message = f"已停止采集，共 {self.sample_count} 个样本"
@@ -299,24 +299,24 @@ class CalibrationSamplerNode(Node):
         if self._try_add_sample():
             response.success = True
             response.message = f"已添加样本 #{self.sample_count}"
-            self.get_logger().info(f"[INFO] 手动添加样本 #{self.sample_count}")
+            self._info(f"[INFO] 手动添加样本 #{self.sample_count}")
         else:
             response.success = False
             response.message = "添加样本失败（标定板未检测到或位姿无效）"
-            self.get_logger().warn("手动添加样本失败")
+            self._warn("手动添加样本失败")
 
         return response
 
     def _calibration_loop(self):
         """标定采集主循环。"""
-        self.get_logger().info("开始执行标定位姿序列...")
+        self._info("开始执行标定位姿序列...")
 
         def on_pose_reached(pose_index: int, joints_deg: list):
             """到达每个位姿后的回调。"""
             if self.state != "sampling":
                 return
 
-            self.get_logger().info(f"到达位姿 {pose_index + 1}，等待稳定...")
+            self._info(f"到达位姿 {pose_index + 1}，等待稳定...")
 
             # 等待稳定
             time.sleep(self.stable_wait)
@@ -326,22 +326,22 @@ class CalibrationSamplerNode(Node):
             retry_delay = 2.0
             for attempt in range(max_retries + 1):
                 if self._try_add_sample():
-                    self.get_logger().info(f"[INFO] 已采集样本 #{self.sample_count}")
+                    self._info(f"[INFO] 已采集样本 #{self.sample_count}")
                     return
                 if attempt < max_retries:
-                    self.get_logger().warn(
+                    self._warn(
                         f"样本无效或标定板未检测到，{retry_delay}s 后重试 ({attempt + 1}/{max_retries})..."
                     )
                     time.sleep(retry_delay)
                 else:
-                    self.get_logger().warn(f"位姿 {pose_index + 1} 采样失败，跳过")
+                    self._warn(f"位姿 {pose_index + 1} 采样失败，跳过")
 
         # 执行位姿序列
         success_count = self.arm_controller.execute_calibration_poses(
             on_pose_reached=on_pose_reached, stable_wait=self.stable_wait
         )
 
-        self.get_logger().info(
+        self._info(
             f"标定位姿序列执行完成，成功 {success_count}/{len(self._calibration_poses_deg)}"
         )
 
@@ -351,7 +351,7 @@ class CalibrationSamplerNode(Node):
             and self.sample_count < self.max_samples
             and self.state == "sampling"
         ):
-            self.get_logger().info(
+            self._info(
                 f"样本不足 ({self.sample_count}/{self.min_samples})，重复采集..."
             )
             time.sleep(2.0)
@@ -363,9 +363,7 @@ class CalibrationSamplerNode(Node):
         if self.sample_count >= self.min_samples:
             self._trigger_calibration()
         else:
-            self.get_logger().warn(
-                f"样本仍不足 ({self.sample_count}/{self.min_samples})，标定终止"
-            )
+            self._warn(f"样本仍不足 ({self.sample_count}/{self.min_samples})，标定终止")
             self.state = "idle"
 
     def _try_add_sample(self) -> bool:
@@ -377,17 +375,17 @@ class CalibrationSamplerNode(Node):
         # 获取 robot_pose
         robot_pose_matrix = self.robot_pose.get_pose_as_matrix()
         if robot_pose_matrix is None:
-            self.get_logger().warn("无法获取机器人位姿")
+            self._warn("无法获取机器人位姿")
             return False
 
         # 获取 camera_pose
         if not self.camera_pose.is_marker_detected():
-            self.get_logger().warn("未检测到标定板")
+            self._warn("未检测到标定板")
             return False
 
         camera_pose_matrix = self.camera_pose.get_pose_as_matrix()
         if camera_pose_matrix is None:
-            self.get_logger().warn("未检测到标定板")
+            self._warn("未检测到标定板")
             return False
 
         # 使用锁保护共享状态的读写
@@ -398,7 +396,7 @@ class CalibrationSamplerNode(Node):
                     robot_pose_matrix[:3, 3] - self._last_valid_robot_pose[:3, 3]
                 )
                 if pos_diff < self.position_threshold:
-                    self.get_logger().warn(
+                    self._warn(
                         f"位置变化不足: {pos_diff:.3f}m < {self.position_threshold}m"
                     )
                     return False
@@ -424,7 +422,7 @@ class CalibrationSamplerNode(Node):
     def _trigger_calibration(self):
         """触发标定计算。"""
         self.state = "calibrating"
-        self.get_logger().info("[INFO] 样本采集完成，调用标定计算...")
+        self._info("[INFO] 样本采集完成，调用标定计算...")
 
         # 通过服务调用 calculator_node 执行标定
         from std_srvs.srv import Trigger
@@ -440,7 +438,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         rclpy.shutdown()

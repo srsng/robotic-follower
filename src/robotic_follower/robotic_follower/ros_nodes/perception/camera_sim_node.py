@@ -40,15 +40,15 @@ import os
 
 import rclpy
 from cv_bridge import CvBridge
-from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
 from robotic_follower.point_cloud.io.projection import colorize_pointcloud
 from robotic_follower.point_cloud.io.ros_converters import numpy_to_pointcloud2
 from robotic_follower.point_cloud.io.sunrgbd_io import load_sunrgbd_data
+from robotic_follower.util.wrapper import NodeWrapper
 
 
-class CameraSimNode(Node):
+class CameraSimNode(NodeWrapper):
     """模拟相机节点。"""
 
     def __init__(self):
@@ -86,13 +86,13 @@ class CameraSimNode(Node):
         # 定时发布
         self.timer = self.create_timer(1.0 / publish_rate, self._timer_callback)
 
-        self.get_logger().info(f"CameraSimNode 初始化完成，发布频率: {publish_rate}Hz")
+        self._info(f"CameraSimNode 初始化完成，发布频率: {publish_rate}Hz")
 
     def _load_data(self):
         """加载 .bin 数据文件。"""
 
         if self.sunrgbd_idx == 0 or self.sunrgbd_idx > 10035:
-            self.get_logger().error("sunrgbd_idx 范围为 0 ~ 10035")
+            self._error("sunrgbd_idx 范围为 0 ~ 10035")
             return
 
         # 解析数据源
@@ -102,18 +102,16 @@ class CameraSimNode(Node):
             bin_path = find_bin_file_path(self.sunrgbd_idx)
             if bin_path is not None:
                 self.bin_file = str(bin_path)
-                self.get_logger().info(f"使用 sunrgbd_idx={self.sunrgbd_idx}")
+                self._info(f"使用 sunrgbd_idx={self.sunrgbd_idx}")
             else:
-                self.get_logger().error(
-                    f"sunrgbd_idx={self.sunrgbd_idx} 未找到 .bin 文件"
-                )
+                self._error(f"sunrgbd_idx={self.sunrgbd_idx} 未找到 .bin 文件")
                 return
         elif not self.bin_file:
-            self.get_logger().error("必须提供 sunrgbd_idx 或 bin_file 参数")
+            self._error("必须提供 sunrgbd_idx 或 bin_file 参数")
             return
 
         if not os.path.exists(self.bin_file):
-            self.get_logger().error(f"文件不存在: {self.bin_file}")
+            self._error(f"文件不存在: {self.bin_file}")
             return
 
         # 加载数据
@@ -124,9 +122,7 @@ class CameraSimNode(Node):
         self.rgb_image = data["rgb_image"]
         self.camera_intrinsic = data["camera_intrinsic"]
 
-        self.get_logger().info(
-            f"成功加载点云，共 {len(self.points)} 个点 (idx={sample_idx})"
-        )
+        self._info(f"成功加载点云，共 {len(self.points)} 个点 (idx={sample_idx})")
 
         if len(self.points) == 0:
             return
@@ -142,7 +138,7 @@ class CameraSimNode(Node):
             )
             if colored is not None and colored.shape[1] == 6:
                 self.points = colored
-                self.get_logger().info("点云已染为 XYZRGB 格式")
+                self._info("点云已染为 XYZRGB 格式")
 
         self.is_data_loaded = True
 
@@ -195,7 +191,7 @@ class CameraSimNode(Node):
             )
             self.pointcloud_pub.publish(pc_msg)
         except Exception as e:
-            self.get_logger().error(f"发布点云失败: {e}")
+            self._error(f"发布点云失败: {e}")
 
         # 发布 RGB 图像
         if self.rgb_image is not None:
@@ -205,7 +201,7 @@ class CameraSimNode(Node):
                 rgb_msg.header.frame_id = "camera_color_optical_frame"
                 self.image_pub.publish(rgb_msg)
             except Exception as e:
-                self.get_logger().error(f"发布图像失败: {e}")
+                self._error(f"发布图像失败: {e}")
 
         # 发布相机内参
         try:
@@ -213,7 +209,7 @@ class CameraSimNode(Node):
             camera_info_msg.header.stamp = now
             self.camera_info_pub.publish(camera_info_msg)
         except Exception as e:
-            self.get_logger().error(f"发布相机内参失败: {e}")
+            self._error(f"发布相机内参失败: {e}")
 
 
 def main(args=None):

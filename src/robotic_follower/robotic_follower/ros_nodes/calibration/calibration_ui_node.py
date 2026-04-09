@@ -7,14 +7,14 @@
 
 import open3d.visualization.gui as gui  # type: ignore
 import rclpy
-from rclpy.node import Node
 
 from robotic_follower.calibration.ui.calibration_ui_panel import CalibrationUIPanel
+from robotic_follower.util.wrapper import NodeWrapper
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Node("calibration_ui_window")
+    node = NodeWrapper("calibration_ui_window")
 
     app = gui.Application.instance
     app.initialize()
@@ -30,7 +30,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         rclpy.shutdown()

@@ -36,13 +36,13 @@
 
 import rclpy
 from geometry_msgs.msg import Point, Quaternion, Vector3
-from rclpy.node import Node
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 
 from robotic_follower.tracking.tracker_3d import Tracker3D
+from robotic_follower.util.wrapper import NodeWrapper
 
 
-class TrackingNode(Node):
+class TrackingNode(NodeWrapper):
     """3D 多目标追踪节点。"""
 
     def __init__(self):
@@ -80,11 +80,11 @@ class TrackingNode(Node):
         # 发布跟踪话题
         self.tracked_pub = self.create_publisher(Detection3DArray, output_topic, 10)
 
-        self.get_logger().info("3D 追踪节点已启动")
+        self._info("3D 追踪节点已启动")
 
     def detection_callback(self, msg: Detection3DArray):
         """检测回调。"""
-        self.get_logger().debug(f"收到 {len(msg.detections)} 个检测")
+        self._debug(f"收到 {len(msg.detections)} 个检测")
 
         # 提取检测信息
         detections = []
@@ -127,7 +127,7 @@ class TrackingNode(Node):
         tracked_msg = self._create_tracked_msg(tracked_objects, msg.header)
         self.tracked_pub.publish(tracked_msg)
         if tracked_objects:
-            self.get_logger().debug(f"发布 {len(tracked_objects)} 个跟踪目标")
+            self._debug(f"发布 {len(tracked_objects)} 个跟踪目标")
 
     def _quaternion_to_yaw(self, q: Quaternion) -> float:
         """从四元数提取 yaw 角。"""
@@ -178,7 +178,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         rclpy.shutdown()

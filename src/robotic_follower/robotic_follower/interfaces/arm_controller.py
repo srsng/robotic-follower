@@ -23,6 +23,8 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
 from std_srvs.srv import SetBool
 
+from robotic_follower.util.handler import NodeHandler
+
 
 def _load_calibration_poses_from_targets() -> list:
     """从 targets.json 加载 p1~p15 标定位姿。
@@ -92,7 +94,7 @@ class _LazyCalibrationPoses:
 CALIBRATION_POSES_DEG = _LazyCalibrationPoses()
 
 
-class ArmController:
+class ArmController(NodeHandler):
     """机械臂运动控制器。
 
     通过 MoveGroup action 发送关节目标，控制机械臂运动。
@@ -109,6 +111,8 @@ class ArmController:
         Args:
             node: ROS2 节点
         """
+        super().__init__(parent_node=node)
+
         self.node = node
         self.joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
 
@@ -132,11 +136,11 @@ class ArmController:
         self.gripper_open_client = node.create_client(SetBool, "dummy_arm/gripper_open")
 
         # 等待服务
-        self.node.get_logger().info("等待 MoveGroup action 服务...")
+        self._info("等待 MoveGroup action 服务...")
         if not self.move_group_client.wait_for_server(timeout_sec=10.0):
-            self.node.get_logger().error("MoveGroup action 服务不可用")
+            self._error("MoveGroup action 服务不可用")
         else:
-            self.node.get_logger().info("MoveGroup action 服务已连接")
+            self._info("MoveGroup action 服务已连接")
 
         self.current_joint_positions = None
 
@@ -149,7 +153,7 @@ class ArmController:
         地面以世界原点为中心，边长5m的矩形，厚度0.01m。
         """
         try:
-            self.node.get_logger().info("正在添加地面障碍物...")
+            self._info("正在添加地面障碍物...")
 
             ws_path = os.path.expanduser("~/ros2_ws")
             script_path = os.path.join(
@@ -169,18 +173,16 @@ class ArmController:
             )
 
             if result.returncode != 0:
-                self.node.get_logger().warning(
-                    f"添加地面障碍物脚本执行失败: {result.stderr}"
-                )
+                self._warn(f"添加地面障碍物脚本执行失败: {result.stderr}")
             else:
-                self.node.get_logger().info("地面障碍物添加完成")
+                self._info("地面障碍物添加完成")
 
         except subprocess.TimeoutExpired:
-            self.node.get_logger().warning("添加地面障碍物超时")
+            self._warn("添加地面障碍物超时")
         except FileNotFoundError as e:
-            self.node.get_logger().warning(f"脚本文件不存在: {e}")
+            self._warn(f"脚本文件不存在: {e}")
         except OSError as e:
-            self.node.get_logger().warning(f"系统错误: {e}")
+            self._warn(f"系统错误: {e}")
 
     def _joint_state_callback(self, msg: JointState) -> None:
         """接收关节状态更新。
@@ -216,9 +218,9 @@ class ArmController:
         Returns:
             True if 使能成功
         """
-        self.node.get_logger().info("请求使能机械臂...")
+        self._info("请求使能机械臂...")
         if not self.robot_enable_client.wait_for_service(timeout_sec=timeout):
-            self.node.get_logger().error("机械臂使能服务不可用")
+            self._error("机械臂使能服务不可用")
             return False
 
         request = SetBool.Request()
@@ -227,12 +229,12 @@ class ArmController:
         rclpy.spin_until_future_complete(self.node, future, timeout_sec=timeout)
 
         if future.result() is None:
-            self.node.get_logger().error("机械臂使能请求超时")
+            self._error("机械臂使能请求超时")
             return False
 
         response = future.result()
         if response.success:
-            self.node.get_logger().info("机械臂使能成功")
+            self._info("机械臂使能成功")
             # 显式关闭夹爪使能并打开夹爪，避免固件联动使能夹爪
             try:
                 # 取消夹爪使能
@@ -251,14 +253,14 @@ class ArmController:
                     rclpy.spin_until_future_complete(
                         self.node, open_future, timeout_sec=2.0
                     )
-                    self.node.get_logger().info("夹爪已打开")
+                    self._info("夹爪已打开")
             except RuntimeError as e:
-                self.node.get_logger().warning(f"夹爪控制运行时错误（已忽略）: {e}")
+                self._warn(f"夹爪控制运行时错误（已忽略）: {e}")
             except OSError as e:
-                self.node.get_logger().warning(f"夹爪控制系统错误（已忽略）: {e}")
+                self._warn(f"夹爪控制系统错误（已忽略）: {e}")
             return True
 
-        self.node.get_logger().error(f"机械臂使能失败: {response.message}")
+        self._error(f"机械臂使能失败: {response.message}")
         return False
 
     def move_to_joints_deg(self, joints_deg: list, wait: bool = True) -> bool:
@@ -287,7 +289,7 @@ class ArmController:
         goal = self._create_move_group_goal(joints_rad)
         goal_handle = self._send_goal_and_wait(goal)
         if goal_handle is None or not goal_handle.accepted:
-            self.node.get_logger().error("目标被拒绝")
+            self._error("目标被拒绝")
             return False
 
         if wait:
@@ -356,12 +358,12 @@ class ArmController:
         Returns:
             GoalHandle 或 None
         """
-        self.node.get_logger().info("发送运动目标...")
+        self._info("发送运动目标...")
         send_future = self.move_group_client.send_goal_async(goal)
         rclpy.spin_until_future_complete(self.node, send_future, timeout_sec=5.0)
 
         if send_future.result() is None:
-            self.node.get_logger().error("目标发送超时")
+            self._error("目标发送超时")
             return None
 
         return send_future.result()
@@ -379,17 +381,15 @@ class ArmController:
         rclpy.spin_until_future_complete(self.node, get_result_future, timeout_sec=60.0)
 
         if get_result_future.result() is None:
-            self.node.get_logger().error("运动执行超时")
+            self._error("运动执行超时")
             return False
 
         result = get_result_future.result()
         if result.result.error_code.val == 1:  # SUCCESS
-            self.node.get_logger().info("运动执行成功")
+            self._info("运动执行成功")
             return True
 
-        self.node.get_logger().error(
-            f"运动执行失败，错误码: {result.result.error_code.val}"
-        )
+        self._error(f"运动执行失败，错误码: {result.result.error_code.val}")
         return False
 
     def execute_calibration_poses(
@@ -413,9 +413,7 @@ class ArmController:
         success_count = 0
 
         for i, joints_deg in enumerate(poses):
-            self.node.get_logger().info(
-                f"移动到标定位姿 {i + 1}/{len(poses)}: {joints_deg}"
-            )
+            self._info(f"移动到标定位姿 {i + 1}/{len(poses)}: {joints_deg}")
 
             if self.move_to_joints_deg(joints_deg, wait=True):
                 success_count += 1
@@ -424,6 +422,6 @@ class ArmController:
                 if on_pose_reached is not None:
                     on_pose_reached(i, joints_deg)
             else:
-                self.node.get_logger().warn(f"位姿 {i + 1} 运动失败，跳过")
+                self._warn(f"位姿 {i + 1} 运动失败，跳过")
 
         return success_count

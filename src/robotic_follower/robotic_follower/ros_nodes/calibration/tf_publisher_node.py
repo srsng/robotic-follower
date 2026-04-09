@@ -26,11 +26,12 @@ import geometry_msgs.msg
 import rclpy
 import std_srvs.srv
 from rcl_interfaces.msg import SetParametersResult
-from rclpy.node import Node
 from tf2_ros import TransformBroadcaster
 
+from robotic_follower.util.wrapper import NodeWrapper
 
-class TFPublisherNode(Node):
+
+class TFPublisherNode(NodeWrapper):
     """TF 发布节点。"""
 
     def __init__(self):
@@ -79,7 +80,7 @@ class TFPublisherNode(Node):
         # 初始化变换（使用默认单位矩阵，直到参数加载）
         self.init_transform()
 
-        self.get_logger().info(
+        self._info(
             f"TF 发布节点已启动，发布 {self.parent_frame} → {self.child_frame} @ {self.publish_rate}Hz"
         )
 
@@ -145,7 +146,7 @@ class TFPublisherNode(Node):
                 self.current_transform.transform.rotation.w = q[3]
 
         except Exception as e:
-            self.get_logger().warn(f"读取参数失败: {e}")
+            self._warn(f"读取参数失败: {e}")
 
     def publish_transform(self):
         """发布 TF 变换。"""
@@ -181,7 +182,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         rclpy.shutdown()
