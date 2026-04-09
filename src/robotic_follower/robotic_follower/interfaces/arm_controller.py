@@ -6,6 +6,7 @@
 import json
 import math
 import os
+import subprocess
 import time
 from collections.abc import Callable
 
@@ -44,16 +45,51 @@ def _load_calibration_poses_from_targets() -> list:
         key = f"p{i}"
         if key not in targets:
             raise ValueError(f"targets.json 中未找到 {key}")
-        joints = targets[key].get("joints", [])
+
+        pose_data = targets[key]
+        unit = pose_data.get("unit", "deg")
+        joints = pose_data.get("joints", [])
+
         if len(joints) != 6:
             raise ValueError(f"{key} joints 长度不为 6: {joints}")
+
+        if unit == "rad":
+            joints = [math.degrees(j) for j in joints]
+        elif unit != "deg":
+            raise ValueError(f"{key} unit 必须为 'deg' 或 'rad'，当前为: {unit}")
+
         poses.append(joints)
 
     return poses
 
 
-# 预定义的标定位姿序列（角度，度），从 targets.json 加载 p1~p15
-CALIBRATION_POSES_DEG = _load_calibration_poses_from_targets()
+def get_calibration_poses() -> list:
+    """延迟加载标定位姿（避免模块级副作用）。
+
+    Returns:
+        标定位姿列表，每个元素为 6 个关节角度（度）的列表
+    """
+    return _load_calibration_poses_from_targets()
+
+
+# 保留向后兼容的常量，但使用延迟加载
+class _LazyCalibrationPoses:
+    """延迟加载的标定位姿。"""
+
+    _poses = None
+
+    def __iter__(self):
+        if self._poses is None:
+            self._poses = _load_calibration_poses_from_targets()
+        return iter(self._poses)
+
+    def __len__(self):
+        if self._poses is None:
+            self._poses = _load_calibration_poses_from_targets()
+        return len(self._poses)
+
+
+CALIBRATION_POSES_DEG = _LazyCalibrationPoses()
 
 
 class ArmController:
@@ -113,31 +149,38 @@ class ArmController:
         地面以世界原点为中心，边长5m的矩形，厚度0.01m。
         """
         try:
-            import os
-            import subprocess
-
-            self.node.get_logger().info("⛳ 正在添加地面障碍物...")
+            self.node.get_logger().info("正在添加地面障碍物...")
 
             ws_path = os.path.expanduser("~/ros2_ws")
             script_path = os.path.join(
                 os.path.dirname(__file__), "../script/add_ground_obstacle.py"
             )
 
-            subprocess.run(
+            result = subprocess.run(
                 [
                     "bash",
                     "-lc",
                     f"cd {ws_path} && source install/setup.bash >/dev/null 2>&1 && "
                     f"python3 {script_path}",
                 ],
-                check=False,
+                capture_output=True,
+                text=True,
                 timeout=15,
             )
 
-            self.node.get_logger().info("✅ 地面障碍物添加完成")
+            if result.returncode != 0:
+                self.node.get_logger().warning(
+                    f"添加地面障碍物脚本执行失败: {result.stderr}"
+                )
+            else:
+                self.node.get_logger().info("地面障碍物添加完成")
 
-        except Exception as e:
-            self.node.get_logger().warn(f"❌ 添加地面障碍失败: {e}")
+        except subprocess.TimeoutExpired:
+            self.node.get_logger().warning("添加地面障碍物超时")
+        except FileNotFoundError as e:
+            self.node.get_logger().warning(f"脚本文件不存在: {e}")
+        except OSError as e:
+            self.node.get_logger().warning(f"系统错误: {e}")
 
     def _joint_state_callback(self, msg: JointState) -> None:
         """接收关节状态更新。
@@ -209,8 +252,10 @@ class ArmController:
                         self.node, open_future, timeout_sec=2.0
                     )
                     self.node.get_logger().info("夹爪已打开")
-            except Exception as e:
-                self.node.get_logger().warn(f"夹爪控制异常（已忽略）: {e}")
+            except RuntimeError as e:
+                self.node.get_logger().warning(f"夹爪控制运行时错误（已忽略）: {e}")
+            except OSError as e:
+                self.node.get_logger().warning(f"夹爪控制系统错误（已忽略）: {e}")
             return True
 
         self.node.get_logger().error(f"机械臂使能失败: {response.message}")
@@ -363,11 +408,13 @@ class ArmController:
         Returns:
             成功到达的位姿数量
         """
+        # 延迟加载标定位姿
+        poses = get_calibration_poses()
         success_count = 0
 
-        for i, joints_deg in enumerate(CALIBRATION_POSES_DEG):
+        for i, joints_deg in enumerate(poses):
             self.node.get_logger().info(
-                f"移动到标定位姿 {i + 1}/{len(CALIBRATION_POSES_DEG)}: {joints_deg}"
+                f"移动到标定位姿 {i + 1}/{len(poses)}: {joints_deg}"
             )
 
             if self.move_to_joints_deg(joints_deg, wait=True):
