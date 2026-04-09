@@ -43,7 +43,6 @@ import warnings
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, Quaternion, Vector3
-from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3D, Detection3DArray
@@ -51,9 +50,10 @@ from vision_msgs.msg import Detection3D, Detection3DArray
 from robotic_follower.detection.inference import create_from_config
 from robotic_follower.detection.inference.__base__ import Detector
 from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
+from robotic_follower.util.wrapper import NodeWrapper
 
 
-class DetectionNode(Node):
+class DetectionNode(NodeWrapper):
     """3D 目标检测节点。"""
 
     detector: Detector | None
@@ -103,7 +103,7 @@ class DetectionNode(Node):
         if os.path.exists(config_file):
             self._load_from_config(config_file)
         else:
-            self.get_logger().error(f"配置文件不存在: {config_file}")
+            self._error(f"配置文件不存在: {config_file}")
 
         # 订阅话题
         self.declare_parameter("pointcloud_topic", "/camera/camera/depth/color/points")
@@ -127,12 +127,12 @@ class DetectionNode(Node):
             else None
         )
 
-        self.get_logger().info(f"3D 检测节点已启动，变换目标: {self.target_frame}")
+        self._info(f"3D 检测节点已启动，变换目标: {self.target_frame}")
 
     def _print_error_if_no_detector(self):
         """无检测器时打印错误。"""
         if self.detector is None or not self.detector.ready:
-            self.get_logger().error("检测器未加载，无法执行检测")
+            self._error("检测器未加载，无法执行检测")
 
     def _resolve_path(self, path: str) -> str:
         """解析路径为绝对路径。"""
@@ -160,19 +160,19 @@ class DetectionNode(Node):
 
         detector_config = config.get("detector", {})
         if not detector_config:
-            self.get_logger().error("配置文件中无 detector 配置")
+            self._error("配置文件中无 detector 配置")
             return
 
         if "type" not in detector_config:
-            self.get_logger().fatal("配置文件中无 type 定义")
+            self._fatal("配置文件中无 type 定义")
             return
 
         self.detector = create_from_config(detector_config, parent_node=self)
 
         if self.detector is not None and self.detector.ready:
-            self.get_logger().info("已加载检测模型")
+            self._info("已加载检测模型")
         else:
-            self.get_logger().error("检测模型未加载")
+            self._error("检测模型未加载")
 
     def _transform_pointcloud(self, points: np.ndarray, stamp) -> np.ndarray | None:
         """将点云从 source_frame 变换到 target_frame。
@@ -197,7 +197,7 @@ class DetectionNode(Node):
                 timeout=rclpy.duration.Duration(seconds=0.5),  # type: ignore
             )
         except Exception as e:
-            self.get_logger().warn(f"TF 变换查询失败: {e}")
+            self._warn(f"TF 变换查询失败: {e}")
             return None
 
         # 提取旋转矩阵和平移向量
@@ -236,41 +236,39 @@ class DetectionNode(Node):
 
     def pointcloud_callback(self, msg: PointCloud2):
         """点云回调。"""
-        self.get_logger().debug(f"收到点云消息: {msg.width * msg.height} 点")
+        self._debug(f"收到点云消息: {msg.width * msg.height} 点")
         if self.detector is None or not self.detector.ready:
-            self.get_logger().warn("检测器未就绪")
+            self._warn("检测器未就绪")
             return
 
         try:
             points = pointcloud2_to_numpy(msg)
-            self.get_logger().debug(
-                f"收到点云: shape={points.shape}, dtype={points.dtype}"
-            )
+            self._debug(f"收到点云: shape={points.shape}, dtype={points.dtype}")
 
             # 只取 XYZ（忽略 RGB），mmdet3d VoteNet 只接受 3 通道输入
             if points.shape[1] > 3:
-                self.get_logger().debug(f"提取 XYZ: shape={points.shape} -> (N, 3)")
+                self._debug(f"提取 XYZ: shape={points.shape} -> (N, 3)")
                 points = points[:, :3]
 
             if len(points) < 100:
-                self.get_logger().warn("点云点数过少，跳过检测")
+                self._warn("点云点数过少，跳过检测")
                 return
 
             # 坐标变换：camera_depth_optical_frame → base_link
             transformed_points = self._transform_pointcloud(points, msg.header.stamp)
             if transformed_points is None:
-                self.get_logger().warn("点云变换失败，跳过本帧")
+                self._warn("点云变换失败，跳过本帧")
                 return
 
             detections = self.detector.detect(transformed_points)
-            self.get_logger().debug(f"检测到 {len(detections)} 个目标")
+            self._debug(f"检测到 {len(detections)} 个目标")
             if detections:
                 detection_msg = self._create_detection_msg(detections, msg.header)
                 self.detections_pub.publish(detection_msg)
-                self.get_logger().debug("已发布检测结果")
+                self._debug("已发布检测结果")
 
         except Exception as e:
-            self.get_logger().error(f"检测失败: {e}")
+            self._error(f"检测失败: {e}")
 
     def _create_detection_msg(self, detections: list, header) -> Detection3DArray:
         """创建检测消息。"""
@@ -312,7 +310,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("收到中断信号")
+        node._info("收到中断信号")
     finally:
         node.destroy_node()
         rclpy.shutdown()

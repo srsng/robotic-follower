@@ -28,8 +28,8 @@ class NodeHandler(ABC):
         self.parent_node = parent_node
 
     @property
-    def _logger(self):
-        """获取日志记录器"""
+    def _node_logger(self):
+        """获取日志记录器（委托给 parent_node）"""
         return self.parent_node.get_logger() if self.parent_node else None
 
     def _log(
@@ -47,7 +47,7 @@ class NodeHandler(ABC):
             fmt (str, optional): 没有父节点时print的格式化，0号位是level，1号位是msg. Defaults to "[{0}]: {1}".
             call Callable[[Level, Msg], None] | None: 日志回调，两个参数分别是`level`, `msg`. Defaults to None.
         """
-        log(level, msg, node=self.parent_node, fmt=fmt, call=call)
+        log(level, msg, node=self._node_logger, fmt=fmt, call=call)
 
     def _debug(self, msg: str):
         self._log("debug", msg)
