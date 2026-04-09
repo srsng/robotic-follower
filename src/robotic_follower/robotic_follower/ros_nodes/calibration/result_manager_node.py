@@ -36,7 +36,9 @@ import geometry_msgs.msg
 import numpy as np
 import rclpy
 import std_srvs.srv
+import yaml
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from scipy.spatial.transform import Rotation
 from std_msgs.msg import String
 
@@ -53,8 +55,8 @@ class CalibrationResultManagerNode(Node):
         self.declare_parameter("result_file", "")
         self.declare_parameter("auto_save", True)
 
-        self.result_file = self.get_parameter("result_file").value
-        self.auto_save = self.get_parameter("auto_save").value
+        self.result_file = str(self.get_parameter("result_file").value)
+        self.auto_save = bool(self.get_parameter("auto_save").value)
 
         if not self.result_file:
             os.makedirs(self.DEFAULT_RESULT_DIR, exist_ok=True)
@@ -64,6 +66,9 @@ class CalibrationResultManagerNode(Node):
 
         # 当前结果
         self.current_result: dict | None = None
+
+        # 启动时自动加载已有标定结果
+        self._auto_load_on_start = True
 
         # 发布
         self.result_pub = self.create_publisher(
@@ -111,6 +116,12 @@ class CalibrationResultManagerNode(Node):
 
         # 状态发布定时器
         self.status_timer = self.create_timer(1.0, self.publish_status)
+
+        # 启动时自动加载已有标定结果
+        if self._auto_load_on_start:
+            result = self.load_from_file()
+            if result:
+                self.set_result(result)
 
         self.get_logger().info("结果管理节点已启动")
 
@@ -161,44 +172,35 @@ class CalibrationResultManagerNode(Node):
 
         self.result_pub.publish(transform_msg)
 
-        # 更新参数服务器
-        self.set_parameter(
-            rclpy.parameter.Parameter(
+        # 更新参数服务器（原子操作）
+        params = [
+            Parameter(
                 "hand_eye_calibration.error",
                 rclpy.Parameter.Type.DOUBLE,
                 data.get("error", 0.0),
-            )
-        )
-        self.set_parameter(
-            rclpy.parameter.Parameter(
+            ),
+            Parameter(
                 "hand_eye_calibration.status",
                 rclpy.Parameter.Type.STRING,
                 "calibrated",
-            )
-        )
-        self.set_parameter(
-            rclpy.parameter.Parameter(
+            ),
+            Parameter(
                 "hand_eye_calibration.sample_count",
                 rclpy.Parameter.Type.INTEGER,
                 data.get("sample_count", 0),
-            )
-        )
-        # 设置平移参数
-        self.set_parameter(
-            rclpy.parameter.Parameter(
+            ),
+            Parameter(
                 "hand_eye_calibration.translation",
                 rclpy.Parameter.Type.DOUBLE_ARRAY,
                 t.flatten().tolist(),
-            )
-        )
-        # 设置旋转参数（四元数）
-        self.set_parameter(
-            rclpy.parameter.Parameter(
+            ),
+            Parameter(
                 "hand_eye_calibration.rotation",
                 rclpy.Parameter.Type.DOUBLE_ARRAY,
                 quat.tolist(),
-            )
-        )
+            ),
+        ]
+        self.set_parameters(params)
 
         self.get_logger().info(f"标定结果已更新，误差: {data.get('error', 0):.6f}m")
 
@@ -208,8 +210,6 @@ class CalibrationResultManagerNode(Node):
             return False
 
         try:
-            import yaml
-
             os.makedirs(os.path.dirname(self.result_file), exist_ok=True)
             with open(self.result_file, "w") as f:
                 yaml.dump(self.current_result, f, default_flow_style=False)
@@ -226,8 +226,6 @@ class CalibrationResultManagerNode(Node):
             if not os.path.exists(self.result_file):
                 self.get_logger().warn(f"结果文件不存在: {self.result_file}")
                 return None
-
-            import yaml
 
             with open(self.result_file) as f:
                 result = yaml.safe_load(f)
