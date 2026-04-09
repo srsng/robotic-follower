@@ -49,7 +49,9 @@ class TFPublisherNode(Node):
 
         # 声明标定结果参数（默认值，result_manager 会更新这些值）
         self.declare_parameter(f"{self.config_namespace}.translation", [0.0, 0.0, 0.0])
-        self.declare_parameter(f"{self.config_namespace}.rotation", [0.0, 0.0, 0.0, 1.0])
+        self.declare_parameter(
+            f"{self.config_namespace}.rotation", [0.0, 0.0, 0.0, 1.0]
+        )
         self.declare_parameter(f"{self.config_namespace}.error", 0.0)
         self.declare_parameter(f"{self.config_namespace}.status", "idle")
         self.declare_parameter(f"{self.config_namespace}.sample_count", 0)
@@ -99,12 +101,21 @@ class TFPublisherNode(Node):
         for param in params:
             if param.name == f"{self.config_namespace}.translation":
                 if param.type_ == rclpy.Parameter.Type.DOUBLE_ARRAY:
+                    if len(param.value) != 3:
+                        return SetParametersResult(
+                            successful=False,
+                            reason="translation must have 3 components",
+                        )
                     self.current_transform.transform.translation.x = param.value[0]
                     self.current_transform.transform.translation.y = param.value[1]
                     self.current_transform.transform.translation.z = param.value[2]
             elif param.name == f"{self.config_namespace}.rotation":
                 if param.type_ == rclpy.Parameter.Type.DOUBLE_ARRAY:
-                    # 四元数 [x, y, z, w]
+                    if len(param.value) != 4:
+                        return SetParametersResult(
+                            successful=False,
+                            reason="rotation must have 4 quaternion components",
+                        )
                     self.current_transform.transform.rotation.x = param.value[0]
                     self.current_transform.transform.rotation.y = param.value[1]
                     self.current_transform.transform.rotation.z = param.value[2]
@@ -138,13 +149,18 @@ class TFPublisherNode(Node):
 
     def publish_transform(self):
         """发布 TF 变换。"""
+        # 检查标定状态，未标定时停止发布
+        try:
+            status_param = self.get_parameter(f"{self.config_namespace}.status")
+            if status_param.type_ == rclpy.Parameter.Type.STRING:
+                status = status_param.value
+                if status in ("idle", "failed", ""):
+                    return  # 未标定，不发布 TF
+        except Exception:
+            pass  # 参数不存在时继续发布
+
         # 更新时间戳
         self.current_transform.header.stamp = self.get_clock().now().to_msg()
-
-        # 从参数服务器更新（周期性检查）
-        self.update_transform_from_parameters()
-
-        # 发布
         self.tf_broadcaster.sendTransform(self.current_transform)
 
     def update_callback(
