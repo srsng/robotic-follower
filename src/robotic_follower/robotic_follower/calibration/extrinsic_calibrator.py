@@ -24,6 +24,8 @@ import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from robotic_follower.util.log import log
+
 
 # 可用的标定方法
 HAND_EYE_METHODS = {
@@ -73,10 +75,10 @@ def calibrate_handeye(
         method: 标定方法，可选 TSAI/PARK/HORAUD/ANDREFF/DANIILIDIS
 
     Returns:
-        rotation_matrix: 3x3 旋转矩阵 (camera2gripper)
-        translation_vector: 3x1 平移向量 (camera2gripper)
+        rotation_matrix: 3x3 旋转矩阵 (gripper2camera)
+        translation_vector: 3x1 平移向量 (gripper2camera)
         quaternion: [x, y, z, w] 四元数
-        error: 重投影误差
+        error: 自洽性误差（标定板在基座坐标系下位姿的方差）
     """
     if len(robot_poses) != len(camera_poses):
         raise ValueError(
@@ -97,9 +99,9 @@ def calibrate_handeye(
         A_motions.append(A)
 
         # B_motion: T_{i}->{i+1} in marker frame
-        # 对于 eye-in-hand: B = marker2camera[i+1] @ marker2camera[i]^-1
-        # 即 camera_pose[i+1]^-1 @ camera_pose[i] 的逆
-        B = compute_motion(camera_poses[i + 1], camera_poses[i])
+        # 对于 eye-in-hand: B = marker2camera[i]^-1 @ marker2camera[i+1]
+        # 即 inv(camera_pose[i]) @ camera_pose[i+1]
+        B = compute_motion(camera_poses[i], camera_poses[i + 1])
         B_motions.append(B)
 
     # 提取旋转矩阵和平移向量
@@ -135,93 +137,71 @@ def calibrate_handeye(
     )
 
     # 旋转向量转旋转矩阵
-    rotation_matrix = cv2.Rodrigues(R_cam2gripper)[0]
+    R_cam2gripper_matrix = cv2.Rodrigues(R_cam2gripper)[0]
 
     # 转置得到 gripper2camera（标定结果表示相机在末端坐标系下的位姿）
     # 根据 cv2.calibrateHandEye 的定义，对于 eye-in-hand:
     # R_cam2gripper 是 camera 相对于 gripper 的旋转
-    # 所以 gripper2camera = R_cam2gripper^T
-    rotation_matrix = rotation_matrix.T
-    t_cam2gripper = -rotation_matrix @ t_cam2gripper
+    # 所以 R_gripper2camera = R_cam2gripper^T
+    R_gripper2camera = R_cam2gripper_matrix.T
+    t_gripper2camera = -R_gripper2camera @ t_cam2gripper.flatten()
 
     # 转换为四元数
-    quaternion = Rotation.from_matrix(rotation_matrix).as_quat()  # [x, y, z, w]
+    quaternion = Rotation.from_matrix(R_gripper2camera).as_quat()  # [x, y, z, w]
 
     # 计算重投影误差
     error = compute_calibration_error(
-        robot_poses, camera_poses, rotation_matrix, t_cam2gripper
+        robot_poses, camera_poses, R_gripper2camera, t_gripper2camera
     )
 
-    return rotation_matrix, t_cam2gripper.flatten(), quaternion, error
+    return R_gripper2camera, t_gripper2camera, quaternion, error
 
 
 def compute_calibration_error(
     robot_poses: list[np.ndarray],
     camera_poses: list[np.ndarray],
-    R_cam2gripper: np.ndarray,
-    t_cam2gripper: np.ndarray,
+    R_gripper2camera: np.ndarray,
+    t_gripper2camera: np.ndarray,
 ) -> float:
-    """计算手眼标定的重投影误差。
+    """计算手眼标定的自洽性误差。
 
-    通过计算相机观测到的标定板位姿与预测位姿之间的差异来评估标定精度。
+    通过计算标定板在机械臂基座坐标系下的位姿一致性来评估标定精度。
+    标定板是固定在空间中的，所以对于所有样本：
+        base2marker = gripper2base @ gripper2camera @ marker2camera
+    应该保持一致。
 
     Args:
         robot_poses: 机械臂末端位姿列表 (gripper2base)
         camera_poses: 相机观测到的标定板位姿列表 (marker2camera)
-        R_cam2gripper: 相机相对于末端的旋转矩阵
-        t_cam2gripper: 相机相对于末端的平移向量
+        R_gripper2camera: gripper 相对于 camera 的旋转矩阵（标定结果）
+        t_gripper2camera: gripper 相对于 camera 的平移向量（标定结果）
 
     Returns:
-        error: 平均重投影误差 (米)
+        error: 平均位姿方差 (米)
     """
-    errors = []
+    # 构造 camera2gripper（标定结果的逆）
+    camera2gripper = np.eye(4)
+    camera2gripper[:3, :3] = R_gripper2camera.T
+    camera2gripper[:3, 3] = -R_gripper2camera.T @ t_gripper2camera
 
+    # 计算每个样本的 base2marker
+    base2marker_poses = []
     for gripper2base, marker2camera in zip(robot_poses, camera_poses):
-        # 预测：标定板在相机坐标系下的位姿
-        # gripper2camera @ marker2gripper = marker2camera
-        # marker2gripper = gripper2camera^-1 @ marker2camera
-        # marker2gripper = camera2gripper^-1 @ marker2camera^-1
-        # 即 gripper2marker = camera2gripper^-1 @ marker2camera^-1
+        # base2marker = gripper2base @ gripper2camera @ marker2camera
+        gripper2camera_mat = np.eye(4)
+        gripper2camera_mat[:3, :3] = R_gripper2camera
+        gripper2camera_mat[:3, 3] = t_gripper2camera
 
-        camera2gripper = np.eye(4)
-        camera2gripper[:3, :3] = R_cam2gripper
-        camera2gripper[:3, 3] = t_cam2gripper.flatten()
+        base2marker = gripper2base @ gripper2camera_mat @ marker2camera
+        base2marker_poses.append(base2marker)
 
-        gripper2camera = np.linalg.inv(camera2gripper)
+    # 计算 base2marker 的平移部分的方差
+    translations = np.array([p[:3, 3] for p in base2marker_poses])
+    mean_translation = translations.mean(axis=0)
+    variance = np.sum((translations - mean_translation) ** 2) / len(translations)
+    std_error = np.sqrt(variance)
 
-        # 预测的标定板位姿 (marker2camera_pred = gripper2camera @ gripper2marker)
-        # 其中 gripper2marker = gripper2base^-1 @ base2marker (假设base2marker固定)
-        # 但我们没有 base2marker，所以我们用第一个样本作为参考
-
-        # 简化误差计算：比较相邻位姿之间的相对变换
-
-    # 使用另一种误差计算方式：
-    # 计算所有样本的重投影误差
-    # 对于 eye-in-hand: marker2camera = gripper2camera @ marker2gripper
-    # 即 marker2camera = camera2gripper^-1 @ gripper2camera @ marker2gripper
-
-    total_error = 0.0
-
-    for i in range(len(robot_poses)):
-        gripper2base = robot_poses[i]
-        marker2camera = camera_poses[i]
-
-        # 计算 gripper2camera
-        gripper2camera = np.eye(4)
-        gripper2camera[:3, :3] = np.linalg.inv(R_cam2gripper)
-        gripper2camera[:3, 3] = -np.linalg.inv(R_cam2gripper) @ t_cam2gripper.flatten()
-
-        # 计算 marker2gripper
-        marker2gripper = gripper2camera @ marker2camera
-
-        # 计算预测的 marker2camera
-        predicted_marker2camera = gripper2camera @ marker2gripper
-
-        # 计算误差（平移部分）
-        t_error = np.linalg.norm(marker2camera[:3, 3] - predicted_marker2camera[:3, 3])
-        total_error += t_error
-
-    return total_error / len(robot_poses)
+    return float(std_error)
 
 
 def find_best_calibration_method(
@@ -253,7 +233,7 @@ def find_best_calibration_method(
                 "error": error,
             }
         except Exception as e:
-            print(f"方法 {method_name} 失败: {e}")
+            log("warn", f"方法 {method_name} 失败: {e}")
             continue
 
     if not results:
