@@ -11,7 +11,7 @@
     ros2 launch robotic_follower hand_eye_calibration.launch.py
 """
 
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -22,6 +22,11 @@ from launch import LaunchDescription
 def generate_launch_description():
     """生成手眼标定系统的 Launch 描述。"""
 
+    # 声明启动参数
+    use_sim_time_arg = DeclareLaunchArgument(
+        "use_sim_time", default_value="false", description="Use simulation time"
+    )
+
     # 1. Include demo_real_arm.launch.py (MoveIt + RViz + TF，不包含机械臂控制器)
     demo_arm_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -29,7 +34,7 @@ def generate_launch_description():
         )
     )
 
-    # 1.5 启动机械臂控制器（必须在 MoveIt 之前启动，以便接收关节状态）
+    # 1.5 启动机械臂控制器（必须在 MoveIt 启动后等待服务可用）
     arm_controller_node = Node(
         package="dummy_controller",
         executable="dummy_arm_controller",
@@ -38,6 +43,7 @@ def generate_launch_description():
         parameters=[
             {
                 "publish_rate": 100,
+                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -69,11 +75,12 @@ def generate_launch_description():
                 "chessboard_cols": 11,
                 "chessboard_rows": 8,
                 "square_size": 0.02,
+                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
 
-    # 4. 标定采样节点
+    # 4. 标定采样节点（依赖 arm_controller 和 chessboard_pose）
     sampler_node = Node(
         package="robotic_follower",
         executable="calibration_sampler",
@@ -86,6 +93,7 @@ def generate_launch_description():
                 "stable_wait": 1.0,
                 "position_threshold": 0.05,
                 "rotation_threshold": 5.0,
+                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -100,6 +108,7 @@ def generate_launch_description():
             {
                 "min_samples": 15,
                 "max_samples": 50,
+                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -110,6 +119,11 @@ def generate_launch_description():
         executable="calibration_result_manager",
         name="calibration_result_manager",
         output="screen",
+        parameters=[
+            {
+                "use_sim_time": "$(var use_sim_time)",
+            }
+        ],
     )
 
     # 7. TF 发布节点
@@ -124,6 +138,7 @@ def generate_launch_description():
                 "child_frame": "camera_link",
                 "publish_rate": 10.0,
                 "config_namespace": "hand_eye_calibration",
+                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -134,20 +149,35 @@ def generate_launch_description():
         executable="calibration_ui",
         name="calibration_ui",
         output="screen",
+        parameters=[
+            {
+                "use_sim_time": "$(var use_sim_time)",
+            }
+        ],
     )
 
     return LaunchDescription(
         [
-            # 声明启动参数
-            DeclareLaunchArgument(
-                "use_sim_time", default_value="false", description="Use simulation time"
-            ),
-            # 启动组件
+            # 启动参数
+            use_sim_time_arg,
+            # 核心组件（MoveIt + 机械臂控制器）
             demo_arm_launch,
-            arm_controller_node,
+            # 等待 MoveIt 服务可用后再启动 arm_controller
+            TimerAction(
+                period=3.0,
+                actions=[arm_controller_node],
+            ),
+            # 相机启动独立进行
             realsense_launch,
-            chessboard_pose_node,
-            sampler_node,
+            # 等待机械臂控制器完全启动后再启动标定节点
+            TimerAction(
+                period=5.0,
+                actions=[chessboard_pose_node],
+            ),
+            TimerAction(
+                period=6.0,
+                actions=[sampler_node],
+            ),
             calculator_node,
             result_manager_node,
             tf_publisher_node,
