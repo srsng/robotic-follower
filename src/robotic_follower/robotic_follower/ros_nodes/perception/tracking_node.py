@@ -49,17 +49,15 @@ class TrackingNode(NodeWrapper):
         super().__init__("tracking_node")
 
         # 参数
-        self.declare_parameter("iou_threshold", 0.3)
-        self.declare_parameter("max_age", 30)
-        self.declare_parameter("min_hits", 3)
-        self.declare_parameter("input_topic", "/perception/detections")
-        self.declare_parameter("output_topic", "/perception/tracked_objects")
-
-        iou_threshold = self.get_parameter("iou_threshold").value
-        max_age = self.get_parameter("max_age").value
-        min_hits = self.get_parameter("min_hits").value
-        input_topic = self.get_parameter("input_topic").value
-        output_topic = self.get_parameter("output_topic").value
+        iou_threshold = self.declare_and_get_parameter("iou_threshold", 0.3)
+        max_age = self.declare_and_get_parameter("max_age", 30)
+        min_hits = self.declare_and_get_parameter("min_hits", 3)
+        input_topic = self.declare_and_get_parameter(
+            "input_topic", "/perception/detections"
+        )
+        output_topic = self.declare_and_get_parameter(
+            "output_topic", "/perception/tracked_objects"
+        )
 
         # 初始化追踪器
         self.tracker = Tracker3D(

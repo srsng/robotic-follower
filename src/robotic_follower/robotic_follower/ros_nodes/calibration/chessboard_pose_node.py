@@ -39,16 +39,11 @@ class ChessboardPoseNode(NodeWrapper):
         super().__init__("chessboard_pose_node")
 
         # 棋盘格参数（GP290: 12x9 格子 -> 11x8 内部角点）
-        self.declare_parameter("chessboard_cols", 11)
-        self.declare_parameter("chessboard_rows", 8)
-        self.declare_parameter("square_size", 0.02)
-        self.declare_parameter("reproj_error_threshold", 1.0)
-
-        self.chessboard_cols = int(self.get_parameter("chessboard_cols").value)  # type: ignore
-        self.chessboard_rows = int(self.get_parameter("chessboard_rows").value)  # type: ignore
-        self.square_size = float(self.get_parameter("square_size").value)  # type: ignore
-        self.reproj_error_threshold = float(
-            self.get_parameter("reproj_error_threshold").value  # type: ignore
+        self.chessboard_cols = self.declare_and_get_parameter("chessboard_cols", 11)
+        self.chessboard_rows = self.declare_and_get_parameter("chessboard_rows", 8)
+        self.square_size = self.declare_and_get_parameter("square_size", 0.02)
+        self.reproj_error_threshold = self.declare_and_get_parameter(
+            "reproj_error_threshold", 1.0
         )
 
         # 相机内参（从 camera_info 获取）

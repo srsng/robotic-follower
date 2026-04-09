@@ -53,11 +53,8 @@ class CalibrationResultManagerNode(NodeWrapper):
         super().__init__("calibration_result_manager")
 
         # 参数
-        self.declare_parameter("result_file", "")
-        self.declare_parameter("auto_save", True)
-
-        self.result_file = str(self.get_parameter("result_file").value)
-        self.auto_save = bool(self.get_parameter("auto_save").value)
+        self.result_file = self.declare_and_get_parameter("result_file", "")
+        self.auto_save = self.declare_and_get_parameter("auto_save", True)
 
         if not self.result_file:
             os.makedirs(self.DEFAULT_RESULT_DIR, exist_ok=True)

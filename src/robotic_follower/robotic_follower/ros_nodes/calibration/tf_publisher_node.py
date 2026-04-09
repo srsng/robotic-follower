@@ -38,30 +38,35 @@ class TFPublisherNode(NodeWrapper):
         super().__init__("tf_publisher")
 
         # 参数
-        self.declare_parameter("parent_frame", "link6_1_1")
-        self.declare_parameter("child_frame", "camera_link")
-        self.declare_parameter("publish_rate", 10.0)
-        self.declare_parameter("config_namespace", "hand_eye_calibration")
-
-        self.parent_frame = self.get_parameter("parent_frame").value
-        self.child_frame = self.get_parameter("child_frame").value
-        self.publish_rate = self.get_parameter("publish_rate").value
-        self.config_namespace = self.get_parameter("config_namespace").value
+        self.parent_frame = self.declare_and_get_parameter("parent_frame", "link6_1_1")
+        self.child_frame = self.declare_and_get_parameter("child_frame", "camera_link")
+        self.publish_rate = self.declare_and_get_parameter("publish_rate", 10.0)
+        self.config_namespace = self.declare_and_get_parameter(
+            "config_namespace", "hand_eye_calibration"
+        )
 
         # 声明标定结果参数（默认值，result_manager 会更新这些值）
-        self.declare_parameter(f"{self.config_namespace}.translation", [0.0, 0.0, 0.0])
-        self.declare_parameter(
-            f"{self.config_namespace}.rotation", [0.0, 0.0, 0.0, 1.0]
+        self.calibration_translation: list[float] = self.declare_and_get_parameter(
+            f"{self.config_namespace}.translation", [0.0, 0.0, 0.0], list[float]
         )
-        self.declare_parameter(f"{self.config_namespace}.error", 0.0)
-        self.declare_parameter(f"{self.config_namespace}.status", "idle")
-        self.declare_parameter(f"{self.config_namespace}.sample_count", 0)
+        self.calibration_rotation: list[float] = self.declare_and_get_parameter(
+            f"{self.config_namespace}.rotation", [0.0, 0.0, 0.0, 1.0], list[float]
+        )
+        self.calibration_error = self.declare_and_get_parameter(
+            f"{self.config_namespace}.error", 0.0
+        )
+        self.calibration_status = self.declare_and_get_parameter(
+            f"{self.config_namespace}.status", "idle"
+        )
+        self.calibration_sample_count = self.declare_and_get_parameter(
+            f"{self.config_namespace}.sample_count", 0
+        )
 
         # TF 发布器
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # 当前变换
-        self.current_transform: geometry_msgs.msg.TransformStamped | None = None
+        self.current_transform: geometry_msgs.msg.TransformStamped = None
 
         # 定时发布
         timer_period = 1.0 / self.publish_rate
@@ -127,38 +132,23 @@ class TFPublisherNode(NodeWrapper):
         """从参数服务器更新变换。"""
         try:
             # 读取平移
-            translation_param = self.get_parameter(
-                f"{self.config_namespace}.translation"
-            )
-            if translation_param.type_ == rclpy.Parameter.Type.DOUBLE_ARRAY:
-                t = translation_param.value
-                self.current_transform.transform.translation.x = t[0]
-                self.current_transform.transform.translation.y = t[1]
-                self.current_transform.transform.translation.z = t[2]
-
+            t = self.calibration_translation
+            self.current_transform.transform.translation.x = t[0]
+            self.current_transform.transform.translation.y = t[1]
+            self.current_transform.transform.translation.z = t[2]
             # 读取旋转（四元数）
-            rotation_param = self.get_parameter(f"{self.config_namespace}.rotation")
-            if rotation_param.type_ == rclpy.Parameter.Type.DOUBLE_ARRAY:
-                q = rotation_param.value
-                self.current_transform.transform.rotation.x = q[0]
-                self.current_transform.transform.rotation.y = q[1]
-                self.current_transform.transform.rotation.z = q[2]
-                self.current_transform.transform.rotation.w = q[3]
-
+            q = self.calibration_rotation
+            self.current_transform.transform.rotation.x = q[0]
+            self.current_transform.transform.rotation.y = q[1]
+            self.current_transform.transform.rotation.z = q[2]
+            self.current_transform.transform.rotation.w = q[3]
         except Exception as e:
             self._warn(f"读取参数失败: {e}")
 
     def publish_transform(self):
         """发布 TF 变换。"""
-        # 检查标定状态，未标定时停止发布
-        try:
-            status_param = self.get_parameter(f"{self.config_namespace}.status")
-            if status_param.type_ == rclpy.Parameter.Type.STRING:
-                status = status_param.value
-                if status in ("idle", "failed", ""):
-                    return  # 未标定，不发布 TF
-        except Exception:
-            pass  # 参数不存在时继续发布
+        if self.calibration_status in ("idle", "failed", ""):
+            return  # 未标定，不发布 TF
 
         # 更新时间戳
         self.current_transform.header.stamp = self.get_clock().now().to_msg()

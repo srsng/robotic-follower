@@ -60,15 +60,19 @@ class PointCloudProcessorNode(NodeWrapper):
         super().__init__("pointcloud_processor")
 
         # 滤波器参数
-        self.declare_parameter("voxel_size", 0.01)
-        self.declare_parameter("statistical_nb_neighbors", 20)
-        self.declare_parameter("statistical_std_ratio", 2.0)
-        self.declare_parameter("passthrough_axis", "z")
-        self.declare_parameter("passthrough_min", 0.3)
-        self.declare_parameter("passthrough_max", 2.0)
+        voxel_size = self.declare_and_get_parameter("voxel_size", 0.01)
+        statistical_nb_neighbors = self.declare_and_get_parameter(
+            "statistical_nb_neighbors", 20
+        )
+        statistical_std_ratio = self.declare_and_get_parameter(
+            "statistical_std_ratio", 2.0
+        )
+        passthrough_axis = self.declare_and_get_parameter("passthrough_axis", "z")
+        passthrough_min = self.declare_and_get_parameter("passthrough_min", 0.3)
+        passthrough_max = self.declare_and_get_parameter("passthrough_max", 2.0)
 
         # 染色参数
-        self.declare_parameter("enable_color", True)
+        self.enable_color = self.declare_and_get_parameter("enable_color", True)
 
         # 初始化组件
         self.bridge = CvBridge()
@@ -77,18 +81,14 @@ class PointCloudProcessorNode(NodeWrapper):
 
         # 创建滤波器
         filter_config = {
-            "voxel_size": self.get_parameter("voxel_size").value,
-            "statistical_nb_neighbors": self.get_parameter(
-                "statistical_nb_neighbors"
-            ).value,
-            "statistical_std_ratio": self.get_parameter("statistical_std_ratio").value,
-            "passthrough_axis": self.get_parameter("passthrough_axis").value,
-            "passthrough_min": self.get_parameter("passthrough_min").value,
-            "passthrough_max": self.get_parameter("passthrough_max").value,
+            "voxel_size": voxel_size,
+            "statistical_nb_neighbors": statistical_nb_neighbors,
+            "statistical_std_ratio": statistical_std_ratio,
+            "passthrough_axis": passthrough_axis,
+            "passthrough_min": passthrough_min,
+            "passthrough_max": passthrough_max,
         }
         self.filter_pipeline = create_default_filter_pipeline(filter_config)
-
-        self.enable_color = self.get_parameter("enable_color").value
 
         # 订阅话题
         self.depth_sub = self.create_subscription(

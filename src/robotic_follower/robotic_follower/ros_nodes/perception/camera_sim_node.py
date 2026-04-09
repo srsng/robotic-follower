@@ -55,15 +55,10 @@ class CameraSimNode(NodeWrapper):
         super().__init__("camera_sim_node")
 
         # 参数
-        self.declare_parameter("bin_file", "")
-        self.declare_parameter("sunrgbd_idx", -1)
-        self.declare_parameter("publish_rate", 1.0)
-        self.declare_parameter("pack_rgb", False)
-
-        self.bin_file = self.get_parameter("bin_file").value
-        self.sunrgbd_idx = self.get_parameter("sunrgbd_idx").value
-        publish_rate = self.get_parameter("publish_rate").value
-        self.pack_rgb = self.get_parameter("pack_rgb").value
+        self.bin_file = self.declare_and_get_parameter("bin_file", "")
+        self.sunrgbd_idx = self.declare_and_get_parameter("sunrgbd_idx", -1)
+        publish_rate = self.declare_and_get_parameter("publish_rate", 1.0)
+        self.pack_rgb = self.declare_and_get_parameter("pack_rgb", False)
 
         self.bridge = CvBridge()
         self.points = None

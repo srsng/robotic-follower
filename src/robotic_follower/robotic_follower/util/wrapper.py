@@ -1,4 +1,4 @@
-from typing import TypeVar
+from typing import TypeVar, get_args, get_origin
 
 from rclpy.node import Node, Parameter
 
@@ -24,15 +24,48 @@ class NodeWrapper(Node, NodeHandler):
         Node.__init__(self, node_name, **kwargs)
         NodeHandler.__init__(self, parent_node=self)
 
+    def _check_type(self, value, expected) -> bool:
+        """递归检查 value 是否符合 expected 类型。
+
+        支持：
+        - 基础类型：str, int, float, bool
+        - list[inner]：验证所有元素类型一致
+        - list[list[...]]：递归验证嵌套列表
+        """
+        if expected in (str, int, float, bool):
+            return isinstance(value, expected)
+
+        origin = get_origin(expected)
+        if origin is list:
+            if not isinstance(value, list):
+                return False
+            args = get_args(expected)
+            if not args:
+                return True  # list 无元素类型参数时不校验
+            inner = args[0]
+            return all(self._check_type(item, inner) for item in value)
+        # 不支持的类型组合，默认放行
+        self._warn(f"不能确定匹配的参数类型: {origin} {value}")
+        return True
+
     def get_parameter_val_typed(self, name: str, expected_type: type[V]) -> V:
-        """获取参数值，并断言其类型为 expected_type。"""
+        """获取参数值，并断言其类型为 expected_type。
+
+        expected_type 可以是基础类型（str/int/float/bool）或泛型类型（list[float]、
+        list[list[float]] 等）。
+        """
         param = self.get_parameter(name)
         if param.type_ == Parameter.Type.NOT_SET:
             raise RuntimeError(f"Parameter '{name}' not declared or not set.")
         if not param.type_.check(param.value):
             raise TypeError(
                 f"Parameter '{name}' has type {type(param.value).__name__}, "
-                f"expected {expected_type.__name__}"
+                f"expected {expected_type!r}"
+            )
+        if not self._check_type(param.value, expected_type):
+            raise TypeError(
+                f"Parameter '{name}' elements have type mismatch, "
+                f"expected {expected_type!r}"
             )
         return param.value  # type: ignore
 
@@ -40,10 +73,17 @@ class NodeWrapper(Node, NodeHandler):
         self,
         name: str,
         default_value: V,
+        expected_type: type[V] | None = None,
     ) -> V:
-        """声明并获取参数，使用 default_value 推断类型
+        """声明并获取参数。
 
-        不支持动态类型，不支持嵌套类型
+        Args:
+            name: 参数名
+            default_value: 默认值，用于 declare 也用于类型推断
+            expected_type: 期望的类型，用于类型断言, 默认使用 type(default_value),
+                若是list[float]、list[list[float]] 等嵌套类型, 需要手动传入确定类型
         """
         self.declare_parameter(name, default_value)
-        return self.get_parameter_val_typed(name, type(default_value))
+        if expected_type is None:
+            expected_type = type(default_value)
+        return self.get_parameter_val_typed(name, expected_type)
