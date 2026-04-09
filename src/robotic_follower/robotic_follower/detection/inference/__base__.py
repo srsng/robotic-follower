@@ -175,8 +175,8 @@ class Detector(NodeHandler):
         Returns:
             检测结果列表, 每个结果包含：
             - bbox: 3D 边界框 [x, y, z, dx, dy, dz, yaw]
-                - [x, y, z] 是bbox底部中心坐标
-                - [dx, dy, dz] 是bbox的长宽高
+                - [x, y, z] 是 bbox 几何中心坐标
+                - [dx, dy, dz] 是 bbox 的长宽高
             - score: 置信度
             - label: 类别标签
             - name: 类别名称
