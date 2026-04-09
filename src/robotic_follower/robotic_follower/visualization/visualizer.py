@@ -656,5 +656,11 @@ def visualize_detections(
     """
     visualizer = DetectionVisualizer(window_name)
     return visualizer.visualize(
-        points, detections, block, rgb_image_path, calib_path, depth2img, class_names=class_names
+        points,
+        detections,
+        block,
+        rgb_image_path,
+        calib_path,
+        depth2img,
+        class_names=class_names,
     )

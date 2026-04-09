@@ -41,6 +41,7 @@ GUI 布局：
     - ROS2 运行在后台线程，GUI 运行在主线程
 """
 
+import contextlib
 import json
 import threading
 import time
@@ -54,7 +55,6 @@ from vision_msgs.msg import Detection3DArray
 
 from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
 from robotic_follower.util.wrapper import NodeWrapper
-import contextlib
 
 
 class Open3DVisualizerNode(NodeWrapper):
