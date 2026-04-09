@@ -2,7 +2,7 @@ import sys
 from collections.abc import Callable
 from typing import NewType
 
-from tint import bold, red, yellow
+from .rich_text import debug, error, fatal, info, warn
 
 
 VALID_LOG_LEVEL = ("debug", "info", "warn", "error", "fatal")
@@ -14,20 +14,20 @@ LogCallback = Callable[[Level, Msg], None]
 DEFAUL_FMT = "[{level}] {message}"
 
 
-def _rich_level(level: str):
+def _rich_log_text(text: str, level: str):
     match level.lower():
         case "fatal":
-            return bold(red(level))
+            return fatal(text)
         case "error":
-            return red(level)
+            return error(text)
         case "warn":
-            return yellow(level)
+            return warn(text)
         case "info":
-            return level
+            return info(text)
         case "debug":
-            return level
+            return debug(text)
         case _:
-            return yellow(level)
+            return warn(text)
 
 
 def _log_by_print(
@@ -37,7 +37,7 @@ def _log_by_print(
     fmt: str | None = None,
 ):
     """log的辅助函数"""
-    level_upper_rich = _rich_level(level.upper())
+    level_upper_rich = _rich_log_text(level.upper(), level)
     if fmt is None:
         fmt = DEFAUL_FMT
 
@@ -60,7 +60,7 @@ def _log_by_ros_logger(
 ):
     """log的辅助函数: 使用 ROS2 logger 输出日志。"""
     try:
-        getattr(ros_logger, level)(msg)
+        getattr(ros_logger, level)(_rich_log_text(msg, level))
     except ValueError as e:
         _log_by_print(level, msg, fmt=fmt)
         # Logger severity cannot be changed between calls.
