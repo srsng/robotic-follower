@@ -17,6 +17,10 @@
 发布话题：
     - /perception/detections (vision_msgs/Detection3DArray)
         3D 目标检测结果（坐标系：target_frame）
+    - /perception/class_names_info (std_msgs/String)
+        检测器类别信息（JSON 格式），包含 class_names、idx2class_name、
+        class_name2idx、ignore_class_idx、ignore_class_names。
+        仅在 detector.ready == True 时首次收到点云后发布一次。
 
 TF 依赖：
     - 当 source_frame != target_frame 时，需要 source_frame → target_frame 的变换路径
@@ -37,6 +41,7 @@ TF 依赖：
     ros2 run robotic_follower detection_node --ros-args -p target_frame:=base_link
 """
 
+import json
 import os
 import warnings
 
@@ -44,6 +49,7 @@ import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, Quaternion, Vector3
 from sensor_msgs.msg import PointCloud2
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3D, Detection3DArray
 
@@ -119,6 +125,12 @@ class DetectionNode(NodeWrapper):
         self.detections_pub = self.create_publisher(
             Detection3DArray, "/perception/detections", 10
         )
+        self.class_names_pub = self.create_publisher(
+            String, "/perception/class_names_info", 10
+        )
+
+        # 发布 class_names 信息（仅在 detector 就绪后发布一次）
+        self._published_class_names = False
 
         # 无检测器时定时打印错误
         self.error_timer = (
@@ -133,6 +145,25 @@ class DetectionNode(NodeWrapper):
         """无检测器时打印错误。"""
         if self.detector is None or not self.detector.ready:
             self._error("检测器未加载，无法执行检测")
+
+    def _publish_class_names_info(self):
+        """发布 class_names 信息到话题。"""
+        if self.detector is None or not self.detector.ready:
+            return
+
+        info = {
+            "class_names": list(self.detector.class_names),
+            "idx2class_name": {
+                str(k): v for k, v in self.detector.idx2class_name.items()
+            },
+            "class_name2idx": self.detector.class_name2idx,
+            "ignore_class_idx": list(self.detector.ignore_class_idx),
+            "ignore_class_names": list(self.detector.ignore_class_names),
+        }
+        msg = String()
+        msg.data = json.dumps(info)
+        self.class_names_pub.publish(msg)
+        self._info("已发布 class_names 信息")
 
     def _resolve_path(self, path: str) -> str:
         """解析路径为绝对路径。"""
@@ -240,6 +271,11 @@ class DetectionNode(NodeWrapper):
         if self.detector is None or not self.detector.ready:
             self._warn("检测器未就绪")
             return
+
+        # 发布 class_names 信息（仅在首次就绪时发布一次）
+        if not self._published_class_names:
+            self._publish_class_names_info()
+            self._published_class_names = True
 
         try:
             points = pointcloud2_to_numpy(msg)
