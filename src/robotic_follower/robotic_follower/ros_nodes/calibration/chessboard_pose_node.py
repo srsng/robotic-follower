@@ -41,10 +41,14 @@ class ChessboardPoseNode(Node):
         self.declare_parameter("chessboard_cols", 11)
         self.declare_parameter("chessboard_rows", 8)
         self.declare_parameter("square_size", 0.02)
+        self.declare_parameter("reproj_error_threshold", 1.0)
 
-        self.chessboard_cols = self.get_parameter("chessboard_cols").value
-        self.chessboard_rows = self.get_parameter("chessboard_rows").value
-        self.square_size = self.get_parameter("square_size").value
+        self.chessboard_cols = int(self.get_parameter("chessboard_cols").value)  # type: ignore
+        self.chessboard_rows = int(self.get_parameter("chessboard_rows").value)  # type: ignore
+        self.square_size = float(self.get_parameter("square_size").value)  # type: ignore
+        self.reproj_error_threshold = float(
+            self.get_parameter("reproj_error_threshold").value  # type: ignore
+        )
 
         # 相机内参（从 camera_info 获取）
         self.camera_matrix: np.ndarray | None = None
@@ -97,6 +101,20 @@ class ChessboardPoseNode(Node):
             f"rows={self.chessboard_rows}, size={self.square_size}m)"
         )
 
+        # 相机内参超时检查（5s 后未收到则警告）
+        self._camera_info_timer = self.create_timer(
+            5.0, self._camera_info_timeout_callback
+        )
+
+    def _camera_info_timeout_callback(self) -> None:
+        """检查相机内参是否收到，超时则警告。"""
+        if not self._camera_info_received:
+            self.get_logger().error(
+                "5s 内未收到相机内参 (/camera/color/camera_info)，请检查相机驱动是否正常发布 camera_info"
+            )
+        # 定时器只执行一次
+        self._camera_info_timer.cancel()
+
     def _generate_object_points(self) -> np.ndarray:
         """生成棋盘格 3D 物理坐标。
 
@@ -133,10 +151,13 @@ class ChessboardPoseNode(Node):
             msg: Image 消息
         """
         if not self._camera_info_received:
+            # todo: 只警告一次，避免日志刷屏
+            self.get_logger().warn("相机内参未收到，跳过图像处理")
             return
 
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
+            # RealSense 发布 BGR8 格式
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except Exception as e:
             self.get_logger().error(f"图像转换失败: {e}")
             return
@@ -174,7 +195,7 @@ class ChessboardPoseNode(Node):
 
         # 计算重投影误差
         reproj_error = self._compute_reprojection_error(rvec, tvec, corners)
-        if reproj_error > 1.0:  # 阈值 1 pixel
+        if reproj_error > self.reproj_error_threshold:
             self._publish_status(f"high_error_{reproj_error:.2f}")
             return
 
