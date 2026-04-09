@@ -169,6 +169,8 @@ def generate_launch_description():
         parameters=[
             {
                 "pointcloud_topic": "/camera/camera/depth/color/points",
+                "source_frame": "camera_depth_optical_frame",
+                "target_frame": "camera_depth_optical_frame",
             }
         ],
     )
