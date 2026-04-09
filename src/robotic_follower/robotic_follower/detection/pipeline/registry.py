@@ -27,10 +27,24 @@ class StageRegistry:
         return decorator
 
     @classmethod
-    def register_algorithm(cls, name: str):
-        """注册算法阶段类型"""
+    def register_algorithm(
+        cls, name: str, class_names: list[str] | tuple[str, ...] | None = None
+    ):
+        """注册算法阶段类型
+
+        Args:
+            name: 算法类型名称
+            class_names: 该算法检测的类别名称列表
+
+        Usage:
+            @StageRegistry.register_algorithm("ground_detector", class_names=["ground", "others"])
+            class GroundDetector(AlgorithmStage):
+                ...
+        """
 
         def decorator(stage_cls: type[AlgorithmStage]) -> type[AlgorithmStage]:
+            if class_names is not None:
+                stage_cls._registered_class_names = tuple(class_names)
             cls._algorithms[name] = stage_cls
             return stage_cls
 

@@ -38,6 +38,7 @@ class AlgoDetector(Detector):
         algorithms: list[AlgorithmStage],
         postprocessors: list[PostProcessor],
         detector_name: str | None = None,
+        ignore_class_names: tuple[str] = tuple([]),
         parent_node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
     ):
         """
@@ -46,17 +47,31 @@ class AlgoDetector(Detector):
             preprocessors: 预处理阶段列表
             algorithms: 算法阶段列表
             postprocessors: 后处理阶段列表
+            ignore_class_names: 忽略目标检测的类名
             parent_node: ROS2 节点实例
         """
-        super().__init__(
-            detector_type="algo",
-            detector_name=detector_name,
-            parent_node=parent_node,
-        )
+        # 在 super().__init__() 之前设置 algorithms，以便 _get_class_names 使用
         self.preprocessors = preprocessors
         self.algorithms = algorithms
         self.postprocessors = postprocessors
-        self._ready = True
+
+        super().__init__(
+            detector_type="algo",
+            detector_name=detector_name,
+            ignore_class_names=ignore_class_names,
+            parent_node=parent_node,
+        )
+
+    def _get_class_names(self) -> tuple[str]:
+        """从算法阶段收集 class_names"""
+        seen = set()
+        class_names = []
+        for algo in self.algorithms:
+            for name in algo.class_names:
+                if name not in seen:
+                    class_names.append(name)
+                    seen.add(name)
+        return tuple(class_names)
 
     @classmethod
     def _config_check(
@@ -204,6 +219,7 @@ class AlgoDetector(Detector):
                 preprocessors=preprocessors,
                 algorithms=algorithms,
                 postprocessors=postprocessors,
+                ignore_class_names=tuple(config.get("ignore_class_names", ())),
                 parent_node=parent_node,
             )
 
@@ -290,7 +306,7 @@ class AlgoDetector(Detector):
     @property
     def ready(self) -> bool:
         """返回检测器是否就绪"""
-        return self._ready and len(self.algorithms) > 0
+        return len(self.algorithms) > 0 and super().ready
 
     def detect(self, points: np.ndarray) -> list[dict]:
         """执行检测
@@ -345,16 +361,21 @@ class AlgoDetector(Detector):
         return self._format_output(data.detections)
 
     def _format_output(self, detections: list[dict]) -> list[dict]:
-        """格式化检测结果"""
+        """格式化检测结果，由检测器统一分配 label"""
         formatted = []
+        class_name2idx = getattr(self, "class_name2idx", {})
         for det in detections:
             if "bbox" not in det:
                 continue
+            name = det.get("name", "unknown")
+            label = det.get("label")
+            if label is None and name in class_name2idx:
+                label = class_name2idx[name]
             item = {
                 "bbox": det["bbox"],
                 "score": det.get("score", 1.0),
-                "label": det.get("label", 0),
-                "name": det.get("name", "unknown"),
+                "label": label if label is not None else 0,
+                "name": name,
             }
             formatted.append(item)
 

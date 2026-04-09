@@ -18,9 +18,9 @@ class Detector(NodeHandler):
     def __init__(
         self,
         detector_type: str,
-        # class_names: list[str],
         detector_name: str | None = None,
-        parent_node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
+        ignore_class_names: tuple[str] = tuple([]),  # noqa: C409
+        parent_node: "rclpy.node.Node | None" = None,  # type: ignore  # noqa: F821
     ):
         """
         初始化检测器
@@ -28,16 +28,71 @@ class Detector(NodeHandler):
         Args:
             detector_type: 检测器类型 ('mmdet3d', 'algo')
             detector_name: 检测器名称
-            # class_names: 目标检测支持的类的列表, 有序
+            ignore_class_names: 忽略目标检测的类名，元组, 无序
             parent_node: ROS2 节点实例, 用于日志输出
         """
+        self._ready = False
         super().__init__(parent_node=parent_node)
+
+        self._not_ready_reasons: list[str] = []
 
         self.detector_name = detector_name if detector_name else "Not named"
         self.detector_type = detector_type
-        # self.class_names = class_names
 
-        self._not_ready_reasons: list[str] = []
+        self.ignore_class_names = ignore_class_names
+        self.idx2class_name: dict[int, str]
+        self.class_name2idx: dict[str, int]
+        self.ignore_class_idx: tuple[int, ...]
+        self.class_names = self._get_class_names()
+        self._init_class_names_stuff()
+
+        self._ready = True
+
+    @abstractmethod
+    def _get_class_names(self) -> tuple[str]:
+        """获取 class_names, 以便初始化检测器
+
+        子类应覆盖此方法，提供各自的 class_names 获取逻辑。
+        此方法在基类 __init__ 中自动调用，子类在 super().__init__() 之前
+        需准备好所需的实例属性（如 config_file 或 algorithms）。
+
+        Returns:
+            tuple[str]: class_names
+        """
+        return tuple([])
+
+    def _init_class_names_stuff(self):
+        """使用 self.class_names 完成对
+        idx2class_name
+        class_name2idx
+        ignore_class_idx
+        的初始化
+        """
+        if not self.class_names:
+            # 子类未设置 class_names 时跳过
+            return
+
+        self.idx2class_name = {
+            i: self.class_names[i] for i in range(len(self.class_names))
+        }
+        self.class_name2idx = {
+            self.class_names[i]: i for i in range(len(self.class_names))
+        }
+
+        # get ignore_class_idx
+        valid_class_names = [
+            name for name in self.ignore_class_names if name in self.class_names
+        ]
+        invalid_class_names = tuple(
+            name for name in self.ignore_class_names if name not in self.class_names
+        )
+        tmp = [self.class_name2idx[name] for name in valid_class_names]
+        tmp.sort()
+        self.ignore_class_idx = tuple(tmp)
+        if len(invalid_class_names) != 0:
+            self._warn(
+                f"无效的 ignore_class_names: {invalid_class_names}, 当前模型支持的class: {self.class_names}"
+            )
 
     @classmethod
     @abstractmethod
@@ -72,7 +127,7 @@ class Detector(NodeHandler):
     @property
     def ready(self) -> bool:
         """根据模型加载状态等因素, 返回检测器是否就绪"""
-        return len(self._not_ready_reasons) == 0
+        return self._ready and len(self._not_ready_reasons) == 0
 
     @property
     def not_ready_reasons(self) -> list[str]:

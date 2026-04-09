@@ -37,61 +37,33 @@ class Mmdet3dDetector(Detector):
             ignore_class_names: 忽略检测结果的类名
             node: ROS2 节点实例，用于日志输出
         """
-        super().__init__(
-            detector_type="mmdet3d", detector_name=detector_name, parent_node=node
-        )
-
+        # 在 super().__init__() 之前设置 config_file，以便 _get_class_names 使用
         self.config_file = config_file
         self.checkpoint_file = checkpoint_file
         self.device = device
         self.score_threshold = score_threshold
         self.model = None
-        self.ignore_class_names = ignore_class_names
 
-        self.class_names = ()
-        self.idx2class_name = {}
-        self.class_name2idx = {}
-        self.ignore_class_idx = ()
+        super().__init__(
+            detector_type="mmdet3d",
+            detector_name=detector_name,
+            ignore_class_names=ignore_class_names,
+            parent_node=node,
+        )
 
-        self._load_config_info(self.config_file)
         self._load_model()
 
     @property
     def ready(self) -> bool:
         return self.model is not None and super().ready
 
-    def _load_config_info(self, config_file: str):
-        """通过 config_file 导入必要信息"""
-
-        # 导入 class_names
-        values = load_var_from_file(config_file, ["class_names"])
-
-        self.class_names = (
-            values["class_names"] if values["class_names"] is not None else ()
+    def _get_class_names(self) -> tuple[str]:
+        """通过 config_file 获取 class_names"""
+        values = load_var_from_file(self.config_file, ["class_names"])
+        class_names = (
+            values["class_names"] if values["class_names"] is not None else tuple([])
         )
-        self.idx2class_name = {
-            i: self.class_names[i] for i in range(len(self.class_names))
-        }
-        self.class_name2idx = {
-            self.class_names[i]: i for i in range(len(self.class_names))
-        }
-        self._init_ignore_class_idx()
-
-    def _init_ignore_class_idx(self):
-        """初始化 ignore_class_idx"""
-        valid_class_names = [
-            name for name in self.ignore_class_names if name in self.class_names
-        ]
-        invalid_class_names = tuple(
-            name for name in self.ignore_class_names if name not in self.class_names
-        )
-        tmp = [self.class_name2idx[name] for name in valid_class_names]
-        tmp.sort()
-        self.ignore_class_idx = tuple(tmp)
-        if len(invalid_class_names) != 0:
-            self._warn(
-                f"无效的 ignore_class_names: {invalid_class_names}, 当前模型支持的class: {self.class_names}"
-            )
+        return class_names
 
     def _load_model(self):
         """加载 MMDetection3D 模型"""

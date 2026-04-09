@@ -7,7 +7,7 @@ from ..registry import StageRegistry
 from ..stages import AlgorithmStage
 
 
-@StageRegistry.register_algorithm("ground_detector")
+@StageRegistry.register_algorithm("ground_detector", class_names=("ground", "others"))
 class GroundDetector(AlgorithmStage):
     """地面检测：检测地面点云并标记为类 0
 
@@ -103,11 +103,11 @@ class GroundDetector(AlgorithmStage):
             # 更新 labels（在 mask 确定之后）
             if len(data.labels) == 0:
                 data.labels = np.full(len(data.points), -1, dtype=np.int32)
-            data.labels[ground_mask] = self.LABEL_GROUND
+            data.labels[ground_mask] = 0
 
             detection = self.make_detection(
                 points=ground_points,
-                label=self.LABEL_GROUND,
+                name="ground",
                 score=1.0,
                 point_indices=ground_indices,
             )

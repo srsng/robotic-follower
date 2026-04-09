@@ -110,15 +110,8 @@ class PreProcessor(PipelineStage):
 class AlgorithmStage(PipelineStage):
     """算法阶段基类（核心检测）"""
 
-    # 预定义的类别标签（按检测顺序分配）
-    LABEL_GROUND = 0
-    LABEL_OTHERS = 1
-
-    # 类别名称映射
-    LABEL_NAMES: dict[int, str] = {
-        LABEL_GROUND: "ground",
-        LABEL_OTHERS: "others",
-    }
+    # 注册时附带的类别名称列表（由装饰器设置）
+    _registered_class_names: tuple[str, ...] | None = None
 
     def __init__(
         self,
@@ -126,6 +119,11 @@ class AlgorithmStage(PipelineStage):
         parent_node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
     ):
         super().__init__("algorithm", stage_name, parent_node)
+        # 使用注册时指定的类别名称，否则为空列表
+        if self._registered_class_names is not None:
+            self.class_names = self._registered_class_names
+        else:
+            self.class_names = tuple([])
 
     @abstractmethod
     def detect(self, data: PipelineData) -> PipelineData:
@@ -150,25 +148,23 @@ class AlgorithmStage(PipelineStage):
     @staticmethod
     def make_detection(
         points: np.ndarray,
-        label: int,
-        score: float = 1.0,
         name: str | None = None,
+        score: float = 1.0,
+        label: int | None = None,
         point_indices: np.ndarray | None = None,
     ) -> dict:
         """创建检测结果
 
         Args:
             points: 目标点云 (N, 3)
-            label: 类别标签
-            score: 置信度
             name: 类别名称
+            score: 置信度
+            label: 类别标签（由检测器统一分配，可为 None）
             point_indices: 原始点云中的索引，未提供则默认 0,1,2...
 
         Returns:
             检测结果字典
         """
-        if name is None:
-            name = AlgorithmStage.LABEL_NAMES.get(label, f"class_{label}")
 
         if point_indices is None:
             point_indices = np.arange(len(points))

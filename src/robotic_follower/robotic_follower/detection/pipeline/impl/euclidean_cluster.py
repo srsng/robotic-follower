@@ -7,7 +7,7 @@ from ..registry import StageRegistry
 from ..stages import AlgorithmStage
 
 
-@StageRegistry.register_algorithm("euclidean_cluster")
+@StageRegistry.register_algorithm("euclidean_cluster", class_names=["cluster"])
 class EuclideanCluster(AlgorithmStage):
     """欧式聚簇：对剩余点云做聚类，每个簇作为一个目标"""
 
@@ -54,12 +54,12 @@ class EuclideanCluster(AlgorithmStage):
             # 更新 labels
             if len(data.labels) == 0:
                 data.labels = np.full(len(data.points), -1, dtype=np.int32)
-            data.labels[actual_indices] = self.LABEL_OTHERS
+            data.labels[actual_indices] = 0
 
             # 创建检测结果
             detection = self.make_detection(
                 points=cluster_points,
-                label=self.LABEL_OTHERS,
+                name="cluster",
                 score=min(1.0, len(cluster_points) / 100),
                 point_indices=actual_indices,
             )
