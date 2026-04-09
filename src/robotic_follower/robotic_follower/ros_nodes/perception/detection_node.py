@@ -59,6 +59,23 @@ from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
 from robotic_follower.util.wrapper import NodeWrapper
 
 
+def filter_warnings():
+    """过滤底层库已知的无害警告"""
+    warnings.filterwarnings(
+        "ignore", message="Unable to import Axes3D", category=UserWarning
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="Unnecessary conv bias before batch/instance norm",
+        category=UserWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="The torch.cuda.*DtypeTensor constructors are no longer recommended",
+        category=UserWarning,
+    )
+
+
 class DetectionNode(NodeWrapper):
     """3D 目标检测节点。"""
 
@@ -74,35 +91,20 @@ class DetectionNode(NodeWrapper):
 
     def __init__(self):
         super().__init__("detection_node")
-
-        # 过滤底层库已知的无害警告
-        warnings.filterwarnings(
-            "ignore", message="Unable to import Axes3D", category=UserWarning
-        )
-        warnings.filterwarnings(
-            "ignore",
-            message="Unnecessary conv bias before batch/instance norm",
-            category=UserWarning,
-        )
-        warnings.filterwarnings(
-            "ignore",
-            message="The torch.cuda.*DtypeTensor constructors are no longer recommended",
-            category=UserWarning,
-        )
-
+        filter_warnings()
         # TF 初始化
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # 参数
-        self.declare_parameter("config_file", self.DEFAULT_CONFIG)
-        self.declare_parameter("target_frame", "camera_depth_optical_frame")
-        self.declare_parameter("source_frame", "camera_depth_optical_frame")
-
-        config_file = os.path.expanduser(str(self.get_parameter("config_file").value))
+        config_file = self.declare_and_get_parameter("config_file", self.DEFAULT_CONFIG)
         config_file = self._resolve_path(config_file)
-        self.target_frame = str(self.get_parameter("target_frame").value)
-        self.source_frame = str(self.get_parameter("source_frame").value)
+        self.target_frame = self.declare_and_get_parameter(
+            "target_frame", "camera_depth_optical_frame"
+        )
+        self.source_frame = self.declare_and_get_parameter(
+            "source_frame", "camera_depth_optical_frame"
+        )
 
         # 加载配置
         self.detector = None
@@ -112,8 +114,9 @@ class DetectionNode(NodeWrapper):
             self._error(f"配置文件不存在: {config_file}")
 
         # 订阅话题
-        self.declare_parameter("pointcloud_topic", "/camera/camera/depth/color/points")
-        pointcloud_topic = str(self.get_parameter("pointcloud_topic").value)
+        pointcloud_topic = self.declare_and_get_parameter(
+            "pointcloud_topic", "/camera/camera/depth/color/points"
+        )
         self.pointcloud_sub = self.create_subscription(
             PointCloud2,
             pointcloud_topic,
@@ -167,6 +170,7 @@ class DetectionNode(NodeWrapper):
 
     def _resolve_path(self, path: str) -> str:
         """解析路径为绝对路径。"""
+        path = os.path.expanduser(path)
 
         if os.path.isabs(path):
             return path

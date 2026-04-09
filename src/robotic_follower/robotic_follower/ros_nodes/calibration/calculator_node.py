@@ -47,13 +47,9 @@ class CalibrationCalculatorNode(NodeWrapper):
         super().__init__("calibration_calculator")
 
         # 参数
-        self.declare_parameter("min_samples", 15)
-        self.declare_parameter("max_samples", 50)
-        self.declare_parameter("method", "BEST")
-
-        self.min_samples = self.get_parameter("min_samples").value
-        self.max_samples = self.get_parameter("max_samples").value
-        self.method = self.get_parameter("method").value
+        self.min_samples = self.declare_and_get_parameter("min_samples", 15)
+        self.max_samples = self.declare_and_get_parameter("max_samples", 50)
+        self.method = self.declare_and_get_parameter("method", "BEST")
 
         # 标定器
         self.calibrator = ExtrinsicCalibrator(min_samples=self.min_samples)

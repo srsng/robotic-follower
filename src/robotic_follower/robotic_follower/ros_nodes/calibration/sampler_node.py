@@ -65,17 +65,15 @@ class CalibrationSamplerNode(NodeWrapper):
         super().__init__("calibration_sampler")
 
         # 参数
-        self.declare_parameter("min_samples", 15)
-        self.declare_parameter("max_samples", 50)
-        self.declare_parameter("stable_wait", 1.0)
-        self.declare_parameter("position_threshold", 0.05)
-        self.declare_parameter("rotation_threshold", 5.0)
-
-        self.min_samples = self.get_parameter("min_samples").value
-        self.max_samples = self.get_parameter("max_samples").value
-        self.stable_wait = self.get_parameter("stable_wait").value
-        self.position_threshold = self.get_parameter("position_threshold").value
-        self.rotation_threshold = self.get_parameter("rotation_threshold").value
+        self.min_samples = self.declare_and_get_parameter("min_samples", 15)
+        self.max_samples = self.declare_and_get_parameter("max_samples", 50)
+        self.stable_wait = self.declare_and_get_parameter("stable_wait", 1.0)
+        self.position_threshold = self.declare_and_get_parameter(
+            "position_threshold", 0.05
+        )
+        self.rotation_threshold = self.declare_and_get_parameter(
+            "rotation_threshold", 5.0
+        )
 
         # 线程安全：保护共享状态
         self._lock = threading.Lock()
