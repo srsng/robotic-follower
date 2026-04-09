@@ -319,6 +319,12 @@ class AlgoDetector(Detector):
         Returns:
             检测结果列表
         """
+        # 检查点云格式，只接受 Nx3
+        points = np.asarray(points)
+        if points.ndim != 2 or points.shape[1] != 3:
+            self._warn(f"Input points must be (N, 3) shape, got {points.shape}")
+            return []
+
         if not self.ready:
             self._warn("Detector not ready")
             return []
