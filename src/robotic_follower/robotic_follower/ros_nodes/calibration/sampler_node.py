@@ -45,6 +45,8 @@ import numpy as np
 import rclpy
 import std_msgs.msg
 import std_srvs.srv
+from pymoveit2 import MoveIt2
+from pymoveit2.robots import dummy as robot
 
 from robotic_follower.interfaces import (
     ArmController,
@@ -60,6 +62,11 @@ class CalibrationSamplerNode(NodeWrapper):
     自动控制机械臂移动，采集 robot_pose 和 camera_pose 样本对。
     样本数达到要求后自动触发标定计算。
     """
+
+    moveit2: MoveIt2
+    robot_pose: RobotPoseInterface
+    camera_pose: ChessboardPoseInterface
+    arm_controller: ArmController
 
     def __init__(self):
         super().__init__("calibration_sampler")
@@ -179,33 +186,22 @@ class CalibrationSamplerNode(NodeWrapper):
 
     def _init_interfaces(self):
         """初始化 PyMoveIt2 和接口。"""
-        try:
-            from pymoveit2 import MoveIt2
-            from pymoveit2.robots import dummy as robot
+        self.moveit2 = MoveIt2(
+            node=self,
+            joint_names=robot.joint_names(),
+            base_link_name=robot.base_link_name(),
+            end_effector_name=robot.end_effector_name(),
+            group_name=robot.MOVE_GROUP_ARM,
+        )
+        self._info("PyMoveIt2 初始化成功")
 
-            self.moveit2 = MoveIt2(
-                node=self,
-                joint_names=robot.joint_names(),
-                base_link_name=robot.base_link_name(),
-                end_effector_name=robot.end_effector_name(),
-                group_name=robot.MOVE_GROUP_ARM,
-            )
-            self._info("PyMoveIt2 初始化成功")
+        self.robot_pose = RobotPoseInterface(self.moveit2)
+        self.camera_pose = ChessboardPoseInterface(self)
+        self.arm_controller = ArmController(self)
 
-            self.robot_pose = RobotPoseInterface(self.moveit2)
-            self.camera_pose = ChessboardPoseInterface(self)
-            self.arm_controller = ArmController(self)
-
-            # 等待关节状态
-            self.arm_controller.wait_for_joint_state(timeout=5.0)
-            self._info("接口初始化完成")
-
-        except ImportError as e:
-            self._error(f"PyMoveIt2 导入失败: {e}")
-            self.moveit2 = None
-            self.robot_pose = None
-            self.camera_pose = None
-            self.arm_controller = None
+        # 等待关节状态
+        self.arm_controller.wait_for_joint_state(timeout=5.0)
+        self._info("接口初始化完成")
 
     def _publish_status(self):
         """发布当前状态。"""
