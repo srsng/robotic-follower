@@ -39,17 +39,15 @@ from launch import LaunchDescription
 
 def to_urdf(xacro_path, parameters=None):
     """将 xacro 文件转换为 URDF 文件。"""
-    urdf_path = tempfile.mktemp(prefix="%s_" % os.path.basename(xacro_path))
+    urdf_path = tempfile.mkstemp(prefix=f"{os.path.basename(xacro_path)}_")
     doc = xacro.process_file(xacro_path, mappings=parameters)
     out = xacro.open_output(urdf_path)
-    out.write(doc.toprettyxml(indent="  "))
+    out.write(doc.toprettyxml(indent="  "))  # type: ignore
     return urdf_path
 
 
 def set_configurable_parameters(local_params):
-    return dict(
-        [(param["name"], LaunchConfiguration(param["name"])) for param in local_params]
-    )
+    return {param["name"]: LaunchConfiguration(param["name"]) for param in local_params}
 
 
 def declare_configurable_parameters(local_params):
@@ -177,8 +175,8 @@ def generate_launch_description():
     visualizer_node = OpaqueFunction(function=get_visualizer_node, args=[params["gui"]])
 
     return LaunchDescription(
-        declare_configurable_parameters(local_parameters)
-        + [
+        [
+            *declare_configurable_parameters(local_parameters),
             camera_sim_node,
             robot_state_publisher_node,
             detection_node,
