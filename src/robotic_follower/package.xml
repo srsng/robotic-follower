@@ -26,6 +26,8 @@
   <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-pil</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
 
   <!-- 相机驱动 -->
   <depend>realsense2_camera</depend>
@@ -47,7 +49,6 @@
 
   <!-- 测试依赖 -->
   <test_depend>ament_copyright</test_depend>
-  <test_depend>pytest-ruff</test_depend>
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
 
