@@ -43,7 +43,6 @@ def generate_launch_description():
         parameters=[
             {
                 "publish_rate": 100,
-                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -75,7 +74,6 @@ def generate_launch_description():
                 "chessboard_cols": 11,
                 "chessboard_rows": 8,
                 "square_size": 0.02,
-                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -95,7 +93,6 @@ def generate_launch_description():
                 "rotation_threshold": 5.0,
                 "max_retry_cycles": 3,
                 "retry_timeout": 120.0,
-                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -110,7 +107,6 @@ def generate_launch_description():
             {
                 "min_samples": 15,
                 "max_samples": 50,
-                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -121,11 +117,7 @@ def generate_launch_description():
         executable="calibration_result_manager",
         name="calibration_result_manager",
         output="screen",
-        parameters=[
-            {
-                "use_sim_time": "$(var use_sim_time)",
-            }
-        ],
+        parameters=[{}],
     )
 
     # 7. TF 发布节点
@@ -140,7 +132,6 @@ def generate_launch_description():
                 "child_frame": "camera_link",
                 "publish_rate": 10.0,
                 "config_namespace": "hand_eye_calibration",
-                "use_sim_time": "$(var use_sim_time)",
             }
         ],
     )
@@ -151,11 +142,6 @@ def generate_launch_description():
         executable="calibration_ui",
         name="calibration_ui",
         output="screen",
-        parameters=[
-            {
-                "use_sim_time": "$(var use_sim_time)",
-            }
-        ],
     )
 
     return LaunchDescription(
