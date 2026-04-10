@@ -1,15 +1,8 @@
-# [submodule "wpr_simulation2"]
-# 	path = src/wpr_simulation2
-# 	url = https://github.com/6-robot/wpr_simulation2.git
-# 	branch = main
 [submodule "hand_eyes_calibration"]
 	path = src/hand_eyes_calibration
 	url = ../hand_eyes_calibration
     branch = main
 [submodule "ros2_dummy_arm_810"]
-	path = src/hand_eyes_calibration
+	path = src/ros2_dummy_arm_810
 	url = https://github.com/231055558/ros2_dummy_arm_810
     branch = main
-[submodule "3rdparty/DSPDet3D"]
-	path = 3rdparty/DSPDet3D
-	url = ../DSPDet3D.git
