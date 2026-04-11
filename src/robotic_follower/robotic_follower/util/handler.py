@@ -44,10 +44,10 @@ class NodeHandler(ABC):
         Args:
             level (str): 日志等级. Should be in ("debug", "info", "warn", "error", "fatal")
             msg (str): 消息
-            fmt (str, optional): 没有父节点时print的格式化，0号位是level，1号位是msg. Defaults to "[{0}]: {1}".
+            fmt (str, optional): 没有父节点时print的格式化.
             call Callable[[Level, Msg], None] | None: 日志回调，两个参数分别是`level`, `msg`. Defaults to None.
         """
-        log(level, msg, node=self._node_logger, fmt=fmt, call=call)
+        log(level, msg, node=self.parent_node, fmt=fmt, call=call)
 
     def _debug(self, msg: str):
         self._log("debug", msg)

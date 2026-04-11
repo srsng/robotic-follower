@@ -1,4 +1,5 @@
 import sys
+import time
 from collections.abc import Callable
 from typing import NewType
 
@@ -11,7 +12,7 @@ Msg = NewType("Msg", str)
 Level = NewType("Level", str)
 LogCallback = Callable[[Level, Msg], None]
 
-DEFAUL_FMT = "[{level}] {message}"
+DEFAUL_FMT = "{time} {level} {message}"
 
 
 def _rich_log_text(text: str, level: str):
@@ -42,10 +43,12 @@ def _log_by_print(
         fmt = DEFAUL_FMT
 
     try:
-        formatted = fmt.format(level=level_upper_rich, message=msg)
+        formatted = fmt.format(level=level_upper_rich, message=msg, time=time.time_ns())
     except (KeyError, IndexError):
-        _log_by_print("warn", f"[log] 日志格式化错误: `{fmt}`", node, fmt)
-        formatted = DEFAUL_FMT.format(level=level_upper_rich, message=msg)
+        _log_by_print("warn", f"[log] 日志格式化错误: `{fmt}`", node, DEFAUL_FMT)
+        formatted = DEFAUL_FMT.format(
+            level=level_upper_rich, message=msg, time=time.time_ns()
+        )
     print(
         formatted,
         file=sys.stderr if level in ("error", "fatal") else None,
@@ -56,7 +59,7 @@ def _log_by_ros_logger(
     level: str,
     msg: str,
     ros_logger,
-    fmt: str | None = "[{0}]: {1}",
+    fmt: str | None = None,
 ):
     """log的辅助函数: 使用 ROS2 logger 输出日志。"""
     try:
@@ -64,7 +67,10 @@ def _log_by_ros_logger(
     except ValueError as e:
         _log_by_print(level, msg, fmt=fmt)
         # Logger severity cannot be changed between calls.
-        _log_by_print("warn", f"上一日志出错了: {e}", fmt=fmt)
+        if "Logger severity cannot be changed between calls" in str(e):
+            _log_by_print("debug", f"上一日志出错了: {e}", fmt=fmt)
+        else:
+            _log_by_print("warn", f"上一日志出错了: {e}", fmt=fmt)
 
 
 def log(
@@ -80,7 +86,7 @@ def log(
         level (str): 日志等级. Should be in ("debug", "info", "warn", "error", "fatal")
         msg (str): 消息
         node (rclpy.node.Node, optional): 可选的父节点. Defaults to None.
-        fmt (str, optional): 没有父节点时 print 的格式化，支持 {level} 和 {message}. Defaults to "[{level}]: {message}".
+        fmt (str, optional): 没有父节点时 print 的格式化，支持 {time} {level} 和 {message}. Defaults to "[{time}][{level}] {message}".
         call Callable[[Level, Msg], None] | None: 日志回调，两个参数分别是 `level`, `msg`. Defaults to None.
     """
     level_ok = True
