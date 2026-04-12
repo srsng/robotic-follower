@@ -37,6 +37,7 @@
 """
 
 import os
+import warnings
 
 import rclpy
 from cv_bridge import CvBridge
@@ -48,12 +49,30 @@ from robotic_follower.point_cloud.io.sunrgbd_io import load_sunrgbd_data
 from robotic_follower.util.wrapper import NodeWrapper
 
 
+def filter_warnings():
+    """过滤底层库已知的无害警告"""
+    warnings.filterwarnings(
+        "ignore", message="Unable to import Axes3D", category=UserWarning
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="Unnecessary conv bias before batch/instance norm",
+        category=UserWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="The torch.cuda.*DtypeTensor constructors are no longer recommended",
+        category=UserWarning,
+    )
+
+
 class CameraSimNode(NodeWrapper):
     """模拟相机节点。"""
 
     def __init__(self):
         super().__init__("camera_sim_node")
 
+        filter_warnings()
         # 参数
         self.bin_file = self.declare_and_get_parameter("bin_file", "")
         self.sunrgbd_idx = self.declare_and_get_parameter("sunrgbd_idx", -1)
@@ -65,6 +84,11 @@ class CameraSimNode(NodeWrapper):
         self.rgb_image = None
         self.camera_intrinsic = None
         self.is_data_loaded = False
+
+        # 缓存预计算的消息，避免每次发布时重新转换
+        self._cached_pointcloud_msg: PointCloud2 | None = None
+        self._cached_rgb_msg: Image | None = None
+        self._cached_camera_info_msg: CameraInfo | None = None
 
         # 发布话题（与实机 realsense2_camera 保持一致）
         self.pointcloud_pub = self.create_publisher(
@@ -137,6 +161,43 @@ class CameraSimNode(NodeWrapper):
 
         self.is_data_loaded = True
 
+        # 预计算消息（避免每次发布时重新转换）
+        self._precompute_messages()
+
+    def _precompute_messages(self):
+        """预计算并缓存要发布的消息。"""
+        now = self.get_clock().now().to_msg()
+
+        # 预计算点云消息
+        if self.points is not None and len(self.points) > 0:
+            try:
+                self._cached_pointcloud_msg = numpy_to_pointcloud2(
+                    self.points,
+                    frame_id="camera_depth_optical_frame",
+                    stamp=now,
+                    pack_rgb=self.pack_rgb,
+                )
+                self._info("点云消息已预计算")
+            except Exception as e:
+                self._error(f"预计算点云消息失败: {e}")
+
+        # 预计算 RGB 图像消息
+        if self.rgb_image is not None:
+            try:
+                rgb_msg = self.bridge.cv2_to_imgmsg(self.rgb_image, encoding="bgr8")
+                rgb_msg.header.frame_id = "camera_color_optical_frame"
+                self._cached_rgb_msg = rgb_msg
+                self._info("RGB 图像消息已预计算")
+            except Exception as e:
+                self._error(f"预计算 RGB 图像消息失败: {e}")
+
+        # 预计算相机内参消息
+        try:
+            self._cached_camera_info_msg = self._intrinsic_to_camera_info()
+            self._info("相机内参消息已预计算")
+        except Exception as e:
+            self._error(f"预计算相机内参消息失败: {e}")
+
     def _intrinsic_to_camera_info(self) -> CameraInfo:
         """将内参矩阵转换为 CameraInfo 消息。"""
         msg = CameraInfo()
@@ -173,38 +234,34 @@ class CameraSimNode(NodeWrapper):
 
     def _timer_callback(self):
         """定时发布缓存数据。"""
-        if not self.is_data_loaded or self.points is None:
+        if not self.is_data_loaded:
             return
 
         now = self.get_clock().now().to_msg()
-        frame_id = "camera_depth_optical_frame"
 
-        # 发布点云
-        try:
-            pc_msg = numpy_to_pointcloud2(
-                self.points, frame_id=frame_id, stamp=now, pack_rgb=self.pack_rgb
-            )
-            self.pointcloud_pub.publish(pc_msg)
-        except Exception as e:
-            self._error(f"发布点云失败: {e}")
-
-        # 发布 RGB 图像
-        if self.rgb_image is not None:
+        # 发布点云（使用预计算的消息）
+        if self._cached_pointcloud_msg is not None:
             try:
-                rgb_msg = self.bridge.cv2_to_imgmsg(self.rgb_image, encoding="bgr8")
-                rgb_msg.header.stamp = now
-                rgb_msg.header.frame_id = "camera_color_optical_frame"
-                self.image_pub.publish(rgb_msg)
+                self._cached_pointcloud_msg.header.stamp = now
+                self.pointcloud_pub.publish(self._cached_pointcloud_msg)
+            except Exception as e:
+                self._error(f"发布点云失败: {e}")
+
+        # 发布 RGB 图像（使用预计算的消息）
+        if self._cached_rgb_msg is not None:
+            try:
+                self._cached_rgb_msg.header.stamp = now
+                self.image_pub.publish(self._cached_rgb_msg)
             except Exception as e:
                 self._error(f"发布图像失败: {e}")
 
-        # 发布相机内参
-        try:
-            camera_info_msg = self._intrinsic_to_camera_info()
-            camera_info_msg.header.stamp = now
-            self.camera_info_pub.publish(camera_info_msg)
-        except Exception as e:
-            self._error(f"发布相机内参失败: {e}")
+        # 发布相机内参（使用预计算的消息）
+        if self._cached_camera_info_msg is not None:
+            try:
+                self._cached_camera_info_msg.header.stamp = now
+                self.camera_info_pub.publish(self._cached_camera_info_msg)
+            except Exception as e:
+                self._error(f"发布相机内参失败: {e}")
 
 
 def main(args=None):
