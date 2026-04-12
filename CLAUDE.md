@@ -213,7 +213,7 @@ colcon test-result --verbose
 ### 训练 3D 检测网络（MMDetection3D）
 
 ```bash
-cd /home/srsnn/ws/py/mmdetection3d
+cd ~/ws/py/mmdetection3d
 
 # 基线 VoteNet 训练
 python3 tools/train.py ~/ros2_ws/src/perception/configs/votenet_sunrgbd_baseline.py
@@ -232,7 +232,7 @@ python3 tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.
 ### 评估模型
 
 ```bash
-cd /home/srsnn/ws/py/mmdetection3d
+cd ~/ws/py/mmdetection3d
 
 # 评估模型
 python3 tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
