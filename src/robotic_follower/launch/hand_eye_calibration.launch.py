@@ -40,11 +40,6 @@ def generate_launch_description():
         executable="dummy_arm_controller",
         name="dummy_arm_controller",
         output="screen",
-        parameters=[
-            {
-                "publish_rate": 100,
-            }
-        ],
     )
 
     # 2. RealSense 相机（写死参数：640x480x30、点云启用、对齐深度）
@@ -117,7 +112,6 @@ def generate_launch_description():
         executable="calibration_result_manager",
         name="calibration_result_manager",
         output="screen",
-        parameters=[{}],
     )
 
     # 7. TF 发布节点
