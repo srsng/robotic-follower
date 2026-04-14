@@ -48,6 +48,7 @@ import warnings
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, Quaternion, Vector3
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
@@ -55,7 +56,10 @@ from vision_msgs.msg import Detection3D, Detection3DArray
 
 from robotic_follower.detection.inference import create_from_config
 from robotic_follower.detection.inference.__base__ import Detector
-from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
+from robotic_follower.point_cloud.io.ros_converters import (
+    numpy_to_pointcloud2,
+    pointcloud2_to_numpy,
+)
 from robotic_follower.util.wrapper import NodeWrapper
 
 
@@ -92,9 +96,10 @@ class DetectionNode(NodeWrapper):
     def __init__(self):
         super().__init__("detection_node")
         filter_warnings()
-        # TF 初始化
+        # TF 初始化 - 使用 best_effort QoS 减少延迟
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        best_effort_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, depth=1)
+        self.tf_listener = TransformListener(self.tf_buffer, self, qos=best_effort_qos)
 
         # 参数
         config_file = self.declare_and_get_parameter("config_file", self.DEFAULT_CONFIG)
@@ -130,6 +135,10 @@ class DetectionNode(NodeWrapper):
         )
         self.class_names_pub = self.create_publisher(
             String, "/perception/class_names_info", 10
+        )
+        # 发布变换后的点云（异步，不阻塞检测）
+        self.transformed_pc_pub = self.create_publisher(
+            PointCloud2, "/perception/pointcloud_transformed", 10
         )
 
         # 发布 class_names 信息（仅在 detector 就绪后发布一次）
@@ -269,6 +278,17 @@ class DetectionNode(NodeWrapper):
         transformed = (R @ points.T).T + translation
         return transformed
 
+    def _publish_transformed_pointcloud(
+        self, points: np.ndarray, header, frame_id: str
+    ):
+        """发布变换后的点云（异步，不阻塞检测）。"""
+        try:
+            pc_msg = numpy_to_pointcloud2(points, frame_id=frame_id, pack_rgb=False)
+            pc_msg.header.stamp = header.stamp
+            self.transformed_pc_pub.publish(pc_msg)
+        except Exception as e:
+            self._warn(f"发布变换点云失败: {e}")
+
     def pointcloud_callback(self, msg: PointCloud2):
         """点云回调。"""
         self._debug(f"收到点云消息: {msg.width * msg.height} 点")
@@ -299,6 +319,11 @@ class DetectionNode(NodeWrapper):
             if transformed_points is None:
                 self._warn("点云变换失败，跳过本帧")
                 return
+
+            # 发布变换后的点云（不阻塞检测）
+            self._publish_transformed_pointcloud(
+                transformed_points, msg.header, self.target_frame
+            )
 
             detections = self.detector.detect(transformed_points)
             self._debug(f"检测到 {len(detections)} 个目标")
