@@ -1,15 +1,9 @@
 """标定模块数据接口。"""
 
-from .arm_controller import CALIBRATION_POSES_DEG, ArmController
-from .camera_pose_interface import CameraPoseInterface
-from .chessboard_pose_interface import ChessboardPoseInterface
-from .robot_pose_interface import RobotPoseInterface
+from .arm_controller import CALIBRATION_POSES_DEG, ArmMoveServerNode
 
 
 __all__ = [
-    "RobotPoseInterface",
-    "CameraPoseInterface",
-    "ChessboardPoseInterface",
-    "ArmController",
+    "ArmMoveServerNode",
     "CALIBRATION_POSES_DEG",
 ]

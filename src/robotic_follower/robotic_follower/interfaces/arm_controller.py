@@ -2,28 +2,30 @@
 
 通过 MoveGroup action 控制机械臂运动到指定关节角度。
 """
+# TODO: 调整文件到节点目录
 
 import json
 import math
 import os
 import subprocess
 import time
-from collections.abc import Callable
 
 import rclpy
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import (
     Constraints,
+    DisplayTrajectory,
     JointConstraint,
     MotionPlanRequest,
 )
+from moveit_msgs.srv import GetMotionPlan
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
 from std_srvs.srv import SetBool
 
-from robotic_follower.util.handler import NodeHandler
+from robotic_follower.util.wrapper import NodeWrapper
 
 
 def _load_calibration_poses_from_targets() -> list:
@@ -94,58 +96,101 @@ class _LazyCalibrationPoses:
 CALIBRATION_POSES_DEG = _LazyCalibrationPoses()
 
 
-class ArmController(NodeHandler):
-    """机械臂运动控制器。
+class ArmMoveServerNode(NodeWrapper):
+    """机械臂运动控制器
 
     通过 MoveGroup action 发送关节目标，控制机械臂运动。
 
     Attributes:
-        node: ROS2 节点
         move_group_client: MoveGroup action 客户端
         current_joint_positions: 当前关节角度列表
     """
 
-    def __init__(self, node: Node) -> None:
+    def __init__(self) -> None:
         """初始化控制器。
 
         Args:
             node: ROS2 节点
         """
-        super().__init__(parent_node=node)
-
-        self.node = node
-        self.joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
-
-        # 订阅关节状态
-        self.joint_state_sub = node.create_subscription(
-            JointState, "joint_states", self._joint_state_callback, 10
+        super().__init__(
+            node_name="arm-move-server-node",
+            parent_node=self,
         )
 
-        # MoveGroup action 客户端
-        self.move_group_client = ActionClient(node, MoveGroup, "/move_action")
+        # MoveIt规划服务客户端 - 这个会使用RViz中的障碍物
+        self.plan_service = self.create_client(GetMotionPlan, "/plan_kinematic_path")
 
-        # 机械臂使能服务客户端
-        self.robot_enable_client = node.create_client(SetBool, "dummy_arm/enable")
+        # MoveGroup Action客户端 - 用于执行规划好的轨迹
+        self.move_group_client = ActionClient(self, MoveGroup, "/move_action")
 
-        # 夹爪使能服务客户端（用于在使能机械臂后取消夹爪使能）
-        self.gripper_enable_client = node.create_client(
+        # 夹爪控制服务客户端
+        self.gripper_open_service = self.create_client(
+            SetBool, "dummy_arm/gripper_open"
+        )
+        self.gripper_close_service = self.create_client(
+            SetBool, "dummy_arm/gripper_close"
+        )
+
+        # 整机使能与夹爪使能服务客户端
+        self.robot_enable_service = self.create_client(SetBool, "dummy_arm/enable")
+        self.gripper_enable_service = self.create_client(
             SetBool, "dummy_arm/gripper_enable"
         )
 
-        # 夹爪打开服务客户端
-        self.gripper_open_client = node.create_client(SetBool, "dummy_arm/gripper_open")
+        # 发布规划结果到RViz显示
+        self.display_trajectory_publisher = self.create_publisher(
+            DisplayTrajectory, "/move_group/display_planned_path", 10
+        )
 
-        # 等待服务
-        self._info("等待 MoveGroup action 服务...")
-        if not self.move_group_client.wait_for_server(timeout_sec=10.0):
-            self._error("MoveGroup action 服务不可用")
-        else:
-            self._info("MoveGroup action 服务已连接")
+        # 订阅当前关节状态
+        self.joint_state_subscriber = self.create_subscription(
+            JointState, "joint_states", self._joint_state_callback, 10
+        )
 
         self.current_joint_positions = None
+        self.joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+
+        # 等待MoveIt服务连接
+        if not self.wait_for_services():
+            self._fatal("❌ MoveIt服务连接失败，请确认已启动demo_real_arm.launch.py")
+            raise RuntimeError("MoveIt服务连接失败")
 
         # 添加地面障碍物
         self.run_add_obstacles()
+
+    def wait_for_services(self, timeout=10.0):
+        """等待MoveIt服务连接"""
+        self._info("等待MoveIt服务连接...")
+        if not self.plan_service.wait_for_service(timeout_sec=timeout):
+            self._error("❌ MoveIt规划服务不可用")
+            return False
+
+        if not self.move_group_client.wait_for_server(timeout_sec=timeout):
+            self._error("❌ MoveGroup Action服务不可用")
+            return False
+
+        if not self.gripper_open_service.wait_for_service(timeout_sec=timeout):
+            self._error("❌ 夹爪打开服务不可用")
+            return False
+
+        if not self.gripper_close_service.wait_for_service(timeout_sec=timeout):
+            self._error("❌ 夹爪关闭服务不可用")
+            return False
+
+        if not self.robot_enable_service.wait_for_service(timeout_sec=timeout):
+            self._error("❌ 整机使能服务不可用")
+            return False
+        if not self.gripper_enable_service.wait_for_service(timeout_sec=timeout):
+            self._error("❌ 夹爪使能服务不可用")
+            return False
+
+        self._info("✅ MoveIt服务连接成功")
+        return True
+
+    def _joint_state_callback(self, msg):
+        """接收当前关节状态"""
+        if len(msg.position) >= 6:
+            self.current_joint_positions = list(msg.position[:6])
 
     def run_add_obstacles(self) -> None:
         """添加地面障碍物到 MoveIt planning scene。
@@ -184,15 +229,6 @@ class ArmController(NodeHandler):
         except OSError as e:
             self._warn(f"系统错误: {e}")
 
-    def _joint_state_callback(self, msg: JointState) -> None:
-        """接收关节状态更新。
-
-        Args:
-            msg: JointState 消息
-        """
-        if len(msg.position) >= 6:
-            self.current_joint_positions = list(msg.position[:6])
-
     def wait_for_joint_state(self, timeout: float = 5.0) -> bool:
         """等待获取关节状态。
 
@@ -209,219 +245,225 @@ class ArmController(NodeHandler):
             time.sleep(0.1)
         return True
 
-    def enable_robot(self, timeout: float = 10.0) -> bool:
-        """使能机械臂。
+    def set_robot_enable(self, enable: bool):
+        """整机使能/去使能"""
+        try:
+            request = SetBool.Request()
+            request.data = bool(enable)
+            action = "使能" if enable else "去使能"
+            self._info(f"🟢 请求{action}机械臂...")
+            future = self.robot_enable_service.call_async(request)
+            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+            if future.result() is None:
+                self._error(f"❌ 机械臂{action}请求超时")
+                return False
+            resp = future.result()
+            if resp.success:  # type: ignore
+                self._info(f"✅ 机械臂{action}成功")
+                # 当机械臂被使能时，确保夹爪不会被联动使能/闭合
+                if enable:
+                    # 取消夹爪使能，并尝试保持夹爪为打开状态
+                    try:
+                        self.set_gripper_enable(False)
+                        # 确保夹爪打开（某些底层在上电会默认闭合）
+                        self.control_gripper(close_gripper=False)
+                    except Exception as _:
+                        pass
+                return True
+            self._error(f"❌ 机械臂{action}失败: {resp.message}")  # type: ignore
+            return False
+        except Exception as e:
+            self._error(f"❌ 机械臂使能控制异常: {e}")
+            return False
+
+    def set_gripper_enable(self, enable: bool):
+        """夹爪使能/去使能"""
+        try:
+            request = SetBool.Request()
+            request.data = bool(enable)
+            action = "使能" if enable else "去使能"
+            self._info(f"🤏 请求{action}夹爪...")
+            future = self.gripper_enable_service.call_async(request)
+            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+            if future.result() is None:
+                self._error(f"❌ 夹爪{action}请求超时")
+                return False
+            resp = future.result()
+            if resp.success:  # type: ignore
+                self._info(f"✅ 夹爪{action}成功")
+                return True
+            self._error(f"❌ 夹爪{action}失败: {resp.message}")  # type: ignore
+            return False
+        except Exception as e:
+            self._error(f"❌ 夹爪使能控制异常: {e}")
+            return False
+
+    def control_gripper(self, close_gripper=True):
+        """控制夹爪开关"""
+        try:
+            request = SetBool.Request()
+            request.data = True  # 服务只需要触发，数据内容不重要
+
+            action_name = "关闭" if close_gripper else "打开"
+            service_client = (
+                self.gripper_close_service
+                if close_gripper
+                else self.gripper_open_service
+            )
+
+            self._info(f"🤏 {action_name}夹爪...")
+
+            future = service_client.call_async(request)
+            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+
+            if future.result() is None:
+                self._error(f"❌ 夹爪{action_name}请求超时")
+                return False
+
+            response = future.result()
+            if response.success:  # type: ignore
+                self._info(f"✅ 夹爪{action_name}成功")
+                return True
+
+            self._error(f"❌ 夹爪{action_name}失败: {response.message}")  # type: ignore
+            return False
+
+        except Exception as e:
+            self._error(f"❌ 夹爪控制异常: {e}")
+            return False
+
+    def get_current_joint_angles_degrees(self):
+        """获取当前关节角度（度数）"""
+        if self.current_joint_positions:
+            return [math.degrees(j) for j in self.current_joint_positions]
+        return None
+
+    def move_to_joints_rad(self, joints_rad: list[float]):
+        """规划并自动执行到指定关节角度（弧度）
 
         Args:
-            timeout: 超时时间（秒）
+            joints_rad: 6 个关节角度（弧度）
 
         Returns:
-            True if 使能成功
+            True if 运动成功
         """
-        self._info("请求使能机械臂...")
-        if not self.robot_enable_client.wait_for_service(timeout_sec=timeout):
-            self._error("机械臂使能服务不可用")
+        try:
+            # 创建MoveGroup目标
+            goal = self._create_move_group_goal(joints_rad)
+
+            # 发送目标到MoveGroup
+            self._info("发送目标到MoveGroup...")
+            send_goal_future = self.move_group_client.send_goal_async(goal)
+            rclpy.spin_until_future_complete(self, send_goal_future, timeout_sec=5.0)
+
+            if send_goal_future.result() is None:
+                self._error("目标发送超时")
+                return False
+
+            goal_handle = send_goal_future.result()
+            if not goal_handle.accepted:
+                self._error("目标被拒绝")
+                return False
+
+            self._info("✅ 目标已接受，开始规划和执行...")
+
+            # 等待执行完成 - 增加超时时间
+            get_result_future = goal_handle.get_result_async()
+            rclpy.spin_until_future_complete(self, get_result_future, timeout_sec=60.0)
+
+            if get_result_future.result() is None:
+                self._error("运动执行超时")
+                return False
+
+            result = get_result_future.result()
+
+            if result.result.error_code.val == 1:
+                self._info("规划和执行成功完成")
+                return True
+            else:  # noqa: RET505
+                error_code = result.result.error_code.val
+                self._error(f"执行失败，错误码: {error_code}")
+                self._handle_execute_err_code(error_code)
+                return False
+
+        except Exception as e:
+            self._error(f"规划执行异常: {e}")
+            import traceback
+
+            self._error(traceback.format_exc())
             return False
 
-        request = SetBool.Request()
-        request.data = True
-        future = self.robot_enable_client.call_async(request)
-        rclpy.spin_until_future_complete(self.node, future, timeout_sec=timeout)
+    def _handle_execute_err_code(self, error_code: int):
+        if error_code == -1:
+            self._error("可能原因：目标位置不可达或存在碰撞")
+        elif error_code == -2:
+            self._error("可能原因：规划超时")
+        elif error_code == -3:
+            self._error("可能原因：无效的机器人状态")
 
-        if future.result() is None:
-            self._error("机械臂使能请求超时")
-            return False
-
-        response = future.result()
-        if response.success:
-            self._info("机械臂使能成功")
-            # 显式关闭夹爪使能并打开夹爪，避免固件联动使能夹爪
-            try:
-                # 取消夹爪使能
-                if self.gripper_enable_client.wait_for_service(timeout_sec=2.0):
-                    gripper_req = SetBool.Request()
-                    gripper_req.data = False
-                    gripper_future = self.gripper_enable_client.call_async(gripper_req)
-                    rclpy.spin_until_future_complete(
-                        self.node, gripper_future, timeout_sec=2.0
-                    )
-                # 打开夹爪
-                if self.gripper_open_client.wait_for_service(timeout_sec=2.0):
-                    open_req = SetBool.Request()
-                    open_req.data = True
-                    open_future = self.gripper_open_client.call_async(open_req)
-                    rclpy.spin_until_future_complete(
-                        self.node, open_future, timeout_sec=2.0
-                    )
-                    self._info("夹爪已打开")
-            except RuntimeError as e:
-                self._warn(f"夹爪控制运行时错误（已忽略）: {e}")
-            except OSError as e:
-                self._warn(f"夹爪控制系统错误（已忽略）: {e}")
-            return True
-
-        self._error(f"机械臂使能失败: {response.message}")
-        return False
-
-    def move_to_joints_deg(self, joints_deg: list, wait: bool = True) -> bool:
+    def move_to_joints_deg(self, joints_deg: list) -> bool:
         """移动机械臂到指定关节角度（度）。
 
         Args:
             joints_deg: 6 个关节角度（度）
-            wait: 是否等待运动完成
 
         Returns:
             True if 运动成功
         """
         joints_rad = [math.radians(d) for d in joints_deg]
-        return self.move_to_joints_rad(joints_rad, wait)
-
-    def move_to_joints_rad(self, joints_rad: list, wait: bool = True) -> bool:
-        """移动机械臂到指定关节角度（弧度）。
-
-        Args:
-            joints_rad: 6 个关节角度（弧度）
-            wait: 是否等待运动完成
-
-        Returns:
-            True if 运动成功
-        """
-        goal = self._create_move_group_goal(joints_rad)
-        goal_handle = self._send_goal_and_wait(goal)
-        if goal_handle is None or not goal_handle.accepted:
-            self._error("目标被拒绝")
-            return False
-
-        if wait:
-            return self._wait_for_result(goal_handle)
-
-        return True
+        return self.move_to_joints_rad(joints_rad)
 
     def _create_move_group_goal(self, target_positions: list) -> MoveGroup.Goal:
-        """创建 MoveGroup goal。
+        """创建 MoveGroup goal
 
         Args:
-            target_positions: 目标关节角度（弧度）
+            target_positions: 目标关节角度（6D, 弧度）
 
         Returns:
             MoveGroup.Goal
         """
         goal = MoveGroup.Goal()
+
+        # 创建规划请求
         motion_plan_request = MotionPlanRequest()
-
         motion_plan_request.group_name = "dummy_arm"
-        motion_plan_request.planner_id = "RRTConnectkConfigDefault"
-        motion_plan_request.num_planning_attempts = 10
-        motion_plan_request.allowed_planning_time = 5.0
-        motion_plan_request.max_velocity_scaling_factor = 0.3
-        motion_plan_request.max_acceleration_scaling_factor = 0.3
 
-        # 起始状态
+        # 设置起始状态
         motion_plan_request.start_state.joint_state.header = Header()
         motion_plan_request.start_state.joint_state.header.stamp = (
-            self.node.get_clock().now().to_msg()
+            self.get_clock().now().to_msg()
         )
         motion_plan_request.start_state.joint_state.name = self.joint_names
         motion_plan_request.start_state.joint_state.position = (
             self.current_joint_positions or [0.0] * 6
         )
 
-        # 目标约束
+        # 设置目标关节约束
         joint_constraints = []
         for name, position in zip(self.joint_names, target_positions):
-            jc = JointConstraint()
-            jc.joint_name = name
-            jc.position = position
-            jc.tolerance_above = 0.01
-            jc.tolerance_below = 0.01
-            jc.weight = 1.0
-            joint_constraints.append(jc)
+            joint_constraint = JointConstraint()
+            joint_constraint.joint_name = name
+            joint_constraint.position = position
+            joint_constraint.tolerance_above = 0.01
+            joint_constraint.tolerance_below = 0.01
+            joint_constraint.weight = 1.0
+            joint_constraints.append(joint_constraint)
 
         goal_constraints = Constraints()
         goal_constraints.joint_constraints = joint_constraints
         motion_plan_request.goal_constraints = [goal_constraints]
 
+        # 设置规划器参数
+        motion_plan_request.planner_id = "RRTConnectkConfigDefault"
+        motion_plan_request.num_planning_attempts = 10
+        motion_plan_request.allowed_planning_time = 10.0  # 增加规划时间
+        motion_plan_request.max_velocity_scaling_factor = 0.3  # 提高速度
+        motion_plan_request.max_acceleration_scaling_factor = 0.3  # 提高加速度
+
         goal.request = motion_plan_request
-        goal.planning_options.plan_only = False
+        goal.planning_options.plan_only = False  # 规划并执行
         goal.planning_options.look_around = False
         goal.planning_options.replan = True
-        goal.planning_options.replan_attempts = 10
+        goal.planning_options.replan_attempts = 10  # 增加重新规划次数
 
         return goal
-
-    def _send_goal_and_wait(self, goal) -> "MoveGroup.GoalHandle | None":
-        """发送 goal 并等待接受。
-
-        Args:
-            goal: MoveGroup.Goal
-
-        Returns:
-            GoalHandle 或 None
-        """
-        self._info("发送运动目标...")
-        send_future = self.move_group_client.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self.node, send_future, timeout_sec=5.0)
-
-        if send_future.result() is None:
-            self._error("目标发送超时")
-            return None
-
-        return send_future.result()
-
-    def _wait_for_result(self, goal_handle) -> bool:
-        """等待运动结果。
-
-        Args:
-            goal_handle: GoalHandle
-
-        Returns:
-            True if 运动成功
-        """
-        get_result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self.node, get_result_future, timeout_sec=60.0)
-
-        if get_result_future.result() is None:
-            self._error("运动执行超时")
-            return False
-
-        result = get_result_future.result()
-        if result.result.error_code.val == 1:  # SUCCESS
-            self._info("运动执行成功")
-            return True
-
-        self._error(f"运动执行失败，错误码: {result.result.error_code.val}")
-        return False
-
-    def execute_calibration_poses(
-        self,
-        on_pose_reached: Callable[[int, list], None] | None = None,
-        stable_wait: float = 1.0,
-    ) -> int:
-        """执行预定义的标定位姿序列。
-
-        依次移动到预定义位姿，到达后调用回调函数。
-
-        Args:
-            on_pose_reached: 到达每个位姿后的回调函数，签名为 (pose_index, joints_deg)
-            stable_wait: 到达后等待稳定的时间（秒）
-
-        Returns:
-            成功到达的位姿数量
-        """
-        # 延迟加载标定位姿
-        poses = get_calibration_poses()
-        success_count = 0
-
-        for i, joints_deg in enumerate(poses):
-            self._info(f"移动到标定位姿 {i + 1}/{len(poses)}: {joints_deg}")
-
-            if self.move_to_joints_deg(joints_deg, wait=True):
-                success_count += 1
-                time.sleep(stable_wait)
-
-                if on_pose_reached is not None:
-                    on_pose_reached(i, joints_deg)
-            else:
-                self._warn(f"位姿 {i + 1} 运动失败，跳过")
-
-        return success_count
