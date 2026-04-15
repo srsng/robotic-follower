@@ -90,7 +90,6 @@ def generate_launch_description():
                 "use_sim_time": use_sim_time,
                 # todo: 减少数据量
                 "pointcloud_topic": "/camera/camera/depth/color/points",
-                "source_frame": "camera_depth_optical_frame",
                 "target_frame": "base_link",
             }
         ],

@@ -107,9 +107,6 @@ class DetectionNode(NodeWrapper):
         self.target_frame = self.declare_and_get_parameter(
             "target_frame", "camera_depth_optical_frame"
         )
-        self.source_frame = self.declare_and_get_parameter(
-            "source_frame", "camera_depth_optical_frame"
-        )
 
         # 加载配置
         self.detector = None
@@ -218,25 +215,28 @@ class DetectionNode(NodeWrapper):
         else:
             self._error("检测模型未加载")
 
-    def _transform_pointcloud(self, points: np.ndarray, stamp) -> np.ndarray | None:
+    def _transform_pointcloud(
+        self, points: np.ndarray, stamp, source_frame: str
+    ) -> np.ndarray | None:
         """将点云从 source_frame 变换到 target_frame。
 
         Args:
             points: 点云数据 (N, 3)
             stamp: 点云时间戳
+            source_frame: 点云源坐标系（从点云header获取）
 
         Returns:
             变换后的点云数据，如果 source_frame == target_frame 则直接返回原始点云
         """
         # 源目标和目标相同时，跳过变换
-        if self.source_frame == self.target_frame:
+        if source_frame == self.target_frame:
             return points
 
         try:
             # 查询变换，支持多跳转
             transform = self.tf_buffer.lookup_transform(
                 self.target_frame,
-                self.source_frame,
+                source_frame,
                 stamp,
                 timeout=rclpy.duration.Duration(seconds=0.5),  # type: ignore
             )
@@ -302,30 +302,42 @@ class DetectionNode(NodeWrapper):
             self._published_class_names = True
 
         try:
-            points = pointcloud2_to_numpy(msg)
-            self._debug(f"收到点云: shape={points.shape}, dtype={points.dtype}")
+            points_full = pointcloud2_to_numpy(msg)
+            self._debug(
+                f"收到点云: shape={points_full.shape}, dtype={points_full.dtype}"
+            )
 
-            # 只取 XYZ（忽略 RGB），mmdet3d VoteNet 只接受 3 通道输入
-            if points.shape[1] > 3:
-                self._debug(f"提取 XYZ: shape={points.shape} -> (N, 3)")
-                points = points[:, :3]
+            # 保留 RGB 用于可视化，只取 XYZ 用于检测
+            has_rgb = points_full.shape[1] > 3
+            if has_rgb:
+                self._debug(f"保留 RGB: shape={points_full.shape}")
+                points_xyz = points_full[:, :3]
+                rgb = points_full[:, 3:]
+            else:
+                points_xyz = points_full
 
-            if len(points) < 100:
+            if len(points_xyz) < 100:
                 self._warn("点云点数过少，跳过检测")
                 return
 
-            # 坐标变换：camera_depth_optical_frame → base_link
-            transformed_points = self._transform_pointcloud(points, msg.header.stamp)
-            if transformed_points is None:
+            # 坐标变换：自动从点云header.frame_id变换到target_frame
+            transformed_xyz = self._transform_pointcloud(
+                points_xyz, msg.header.stamp, msg.header.frame_id
+            )
+            if transformed_xyz is None:
                 self._warn("点云变换失败，跳过本帧")
                 return
 
-            # 发布变换后的点云（不阻塞检测）
+            # 发布变换后的点云（保留 RGB 用于可视化）
+            if has_rgb:
+                transformed_full = np.column_stack([transformed_xyz, rgb])
+            else:
+                transformed_full = transformed_xyz
             self._publish_transformed_pointcloud(
-                transformed_points, msg.header, self.target_frame
+                transformed_full, msg.header, self.target_frame
             )
 
-            detections = self.detector.detect(transformed_points)
+            detections = self.detector.detect(transformed_xyz)
             self._debug(f"检测到 {len(detections)} 个目标")
             if detections:
                 detection_msg = self._create_detection_msg(detections, msg.header)
