@@ -44,6 +44,8 @@ setup(
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
         # RViz 配置文件
         (os.path.join("share", package_name, "rviz"), glob("rviz/*.rviz")),
+        # URDF 文件
+        (os.path.join("share", package_name, "urdf"), glob("urdf/*.xacro")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
