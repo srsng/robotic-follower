@@ -46,6 +46,7 @@ import os
 
 import numpy as np
 import rclpy
+from ament_index_python import get_package_share_directory
 from geometry_msgs.msg import Point, Quaternion, Vector3
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2
@@ -67,13 +68,18 @@ class DetectionNode(NodeWrapper):
 
     detector: Detector | None
 
-    # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/votenet_config.yaml"
-    # DEFAULT_CONFIG = (
-    #     "~/ros2_ws/src/robotic_follower/model/config/density_votenet_config.yaml"
-    # )
-    DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/ground_cluster.yaml"
-    # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/density_votenet_config_mini.yaml"
-    # DEFAULT_CONFIG = "~/ros2_ws/src/robotic_follower/model/config/density_votenet_to_scene-70c.yaml"
+    DEFAULT_CONFIG_ROOT = os.path.join(
+        get_package_share_directory("robotic_follower"),
+        "model",
+        "config",
+    )
+
+    DEFAULT_CONFIG_NAME = "votenet_config.yaml"
+    # DEFAULT_CONFIG_NAME = "density_votenet_config.yaml"
+    # DEFAULT_CONFIG_NAME = "density_votenet_to_scene-70c.yaml"
+    # DEFAULT_CONFIG_NAME = "ground_cluster.yaml"
+
+    DEFAULT_CONFIG = os.path.join(DEFAULT_CONFIG_ROOT, DEFAULT_CONFIG_NAME)
 
     def __init__(self):
         super().__init__("detection_node")
@@ -215,12 +221,13 @@ class DetectionNode(NodeWrapper):
             return points
 
         try:
-            # 查询变换，支持多跳转
+            # 查询变换，使用当前时间避免时间同步问题
+            now = rclpy.time.Time(seconds=0)
             transform = self.tf_buffer.lookup_transform(
                 self.target_frame,
                 source_frame,
-                stamp,
-                timeout=rclpy.duration.Duration(seconds=0.5),  # type: ignore
+                now,
+                timeout=rclpy.duration.Duration(seconds=1.0),  # type: ignore
             )
         except Exception as e:
             self._warn(f"TF 变换查询失败: {e}")
