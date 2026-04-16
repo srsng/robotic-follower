@@ -65,11 +65,14 @@ setup(
             "pointcloud_processor=robotic_follower.ros_nodes.perception.pointcloud_processor:main",
             "detection_node=robotic_follower.ros_nodes.perception.detection_node:main",
             "tracking_node=robotic_follower.ros_nodes.perception.tracking_node:main",
+            "following_node=robotic_follower.ros_nodes.perception.following_node:main",
             # === 可视化节点 ===
             "rviz_visualizer=robotic_follower.ros_nodes.visualization.rviz_visualizer_node:main",
             "open3d_visualizer=robotic_follower.ros_nodes.visualization.open3d_visualizer_node:main",
             # === 标定模块节点 ===
             "chessboard_tf=robotic_follower.ros_nodes.calibration.chessboard_tf_node:main",
+            # === UI相关节点 ===
+            "track_selector_node=robotic_follower.ros_nodes.perception.track_selector_node:main",
         ],
     },
 )

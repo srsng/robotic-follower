@@ -2,7 +2,9 @@
 
 from .camera_sim_node import CameraSimNode
 from .detection_node import DetectionNode
+from .following_node import FollowingNode
 from .pointcloud_processor import PointCloudProcessorNode
+from .track_selector_node import TrackSelectorNode
 from .tracking_node import TrackingNode
 
 
@@ -11,4 +13,6 @@ __all__ = [
     "DetectionNode",
     "PointCloudProcessorNode",
     "TrackingNode",
+    "TrackSelectorNode",
+    "FollowingNode",
 ]
