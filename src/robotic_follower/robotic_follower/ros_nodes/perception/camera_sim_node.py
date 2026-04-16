@@ -37,7 +37,6 @@
 """
 
 import os
-import warnings
 
 import rclpy
 from cv_bridge import CvBridge
@@ -49,30 +48,12 @@ from robotic_follower.point_cloud.io.sunrgbd_io import load_sunrgbd_data
 from robotic_follower.util.wrapper import NodeWrapper
 
 
-def filter_warnings():
-    """过滤底层库已知的无害警告"""
-    warnings.filterwarnings(
-        "ignore", message="Unable to import Axes3D", category=UserWarning
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message="Unnecessary conv bias before batch/instance norm",
-        category=UserWarning,
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message="The torch.cuda.*DtypeTensor constructors are no longer recommended",
-        category=UserWarning,
-    )
-
-
 class CameraSimNode(NodeWrapper):
     """模拟相机节点。"""
 
     def __init__(self):
         super().__init__("camera_sim_node")
 
-        filter_warnings()
         # 参数
         self.bin_file = self.declare_and_get_parameter("bin_file", "")
         self.sunrgbd_idx = self.declare_and_get_parameter("sunrgbd_idx", -1)

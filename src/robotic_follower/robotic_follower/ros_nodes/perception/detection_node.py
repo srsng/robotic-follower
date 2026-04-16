@@ -43,7 +43,6 @@ TF 依赖：
 
 import json
 import os
-import warnings
 
 import numpy as np
 import rclpy
@@ -63,23 +62,6 @@ from robotic_follower.point_cloud.io.ros_converters import (
 from robotic_follower.util.wrapper import NodeWrapper
 
 
-def filter_warnings():
-    """过滤底层库已知的无害警告"""
-    warnings.filterwarnings(
-        "ignore", message="Unable to import Axes3D", category=UserWarning
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message="Unnecessary conv bias before batch/instance norm",
-        category=UserWarning,
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message="The torch.cuda.*DtypeTensor constructors are no longer recommended",
-        category=UserWarning,
-    )
-
-
 class DetectionNode(NodeWrapper):
     """3D 目标检测节点。"""
 
@@ -95,7 +77,7 @@ class DetectionNode(NodeWrapper):
 
     def __init__(self):
         super().__init__("detection_node")
-        filter_warnings()
+
         # TF 初始化 - 使用 best_effort QoS 减少延迟
         self.tf_buffer = Buffer()
         best_effort_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, depth=1)
