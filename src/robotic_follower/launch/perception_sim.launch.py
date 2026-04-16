@@ -20,47 +20,22 @@
 """
 
 import os
-import tempfile
 
-import xacro
 from ament_index_python.packages import get_package_share_directory
 from launch.actions import (
-    DeclareLaunchArgument,
     IncludeLaunchDescription,
     OpaqueFunction,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 from launch import LaunchDescription
-
-
-def to_urdf(xacro_path, parameters=None):
-    """将 xacro 文件转换为 URDF 文件。"""
-    urdf_path = tempfile.mktemp(
-        prefix=f"{os.path.basename(xacro_path)}_", suffix=".urdf"
-    )
-    doc = xacro.process_file(xacro_path, mappings=parameters)
-    out = xacro.open_output(urdf_path)
-    out.write(doc.toprettyxml(indent="  "))  # type: ignore
-    return urdf_path
-
-
-def set_configurable_parameters(local_params):
-    return {param["name"]: LaunchConfiguration(param["name"]) for param in local_params}
-
-
-def declare_configurable_parameters(local_params):
-    return [
-        DeclareLaunchArgument(
-            param["name"],
-            default_value=param["default"],
-            description=param["description"],
-        )
-        for param in local_params
-    ]
+from robotic_follower.util.launch import (
+    declare_configurable_parameters,
+    set_configurable_parameters,
+    to_urdf,
+)
 
 
 local_parameters = [
