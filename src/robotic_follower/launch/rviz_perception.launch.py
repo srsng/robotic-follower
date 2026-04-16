@@ -51,8 +51,10 @@ def get_rviz_config_path(rviz_config_name: str) -> str:
         pass
 
     # fallback
-    return os.path.expanduser(
-        f"~/ros2_ws/install/robotic_follower/share/robotic_follower/rviz/{rviz_config_name}.rviz"
+    return os.path.join(
+        get_package_share_directory("dummy-ros2_description"),
+        "rviz",
+        "perception_rviz.rviz",
     )
 
 
