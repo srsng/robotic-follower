@@ -1,8 +1,8 @@
-[submodule "hand_eyes_calibration"]
-	path = src/hand_eyes_calibration
-	url = ../hand_eyes_calibration
-    branch = main
 [submodule "ros2_dummy_arm_810"]
 	path = src/ros2_dummy_arm_810
 	url = https://github.com/231055558/ros2_dummy_arm_810
     branch = main
+[submodule "easy_handeye2"]
+	path = src/easy_handeye2
+	url = https://github.com/marcoesposito1988/easy_handeye2
+    branch = master
