@@ -23,6 +23,7 @@ class NodeWrapper(Node, NodeHandler):
     def __init__(self, node_name: str, **kwargs):
         Node.__init__(self, node_name, **kwargs)
         NodeHandler.__init__(self, parent_node=self)
+        self._filter_warnings()
 
     def _check_type(self, value, expected) -> bool:
         """递归检查 value 是否符合 expected 类型。
@@ -87,3 +88,16 @@ class NodeWrapper(Node, NodeHandler):
         if expected_type is None:
             expected_type = type(default_value)
         return self.get_parameter_val_typed(name, expected_type)
+
+    @staticmethod
+    def _filter_warnings():
+        """过滤底层库已知的无害警告"""
+        import warnings
+
+        messages = [
+            "Unable to import Axes3D",
+            "Unnecessary conv bias before batch/instance norm",
+            "The torch.cuda.*DtypeTensor constructors are no longer recommended",
+        ]
+        for msg in messages:
+            warnings.filterwarnings("ignore", message=msg, category=UserWarning)
