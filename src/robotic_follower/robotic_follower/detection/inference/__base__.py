@@ -199,7 +199,7 @@ class Detector(NodeHandler):
         """
         if level == "fatal":
             self._not_ready_reasons.append(msg)
-        fmt = f"[detector-{self.detector_type}-{self.detector_name}][{{0}}]: {{1}}"
+        fmt = f"[detector-{self.detector_type}-{self.detector_name}][{{level}}]: {{message}}"
         super()._log(level, msg, fmt=fmt, call=call)
 
     def _to_numpy(self, attr) -> np.ndarray:
