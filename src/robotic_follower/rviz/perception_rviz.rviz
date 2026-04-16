@@ -194,26 +194,19 @@ Visualization Manager:
           camera_bottom_screw_frame:
             camera_link:
               camera_accel_frame:
-                camera_accel_optical_frame:
-                  {}
+                camera_accel_optical_frame: {}
               camera_color_frame:
-                camera_color_optical_frame:
-                  {}
+                camera_color_optical_frame: {}
               camera_depth_frame:
-                camera_depth_optical_frame:
-                  {}
+                camera_depth_optical_frame: {}
               camera_gyro_frame:
                 camera_gyro_optical_frame:
-                  camera_imu_optical_frame:
-                    {}
+                  camera_imu_optical_frame: {}
               camera_infra1_frame:
-                camera_infra1_optical_frame:
-                  {}
+                camera_infra1_optical_frame: {}
               camera_infra2_frame:
-                camera_infra2_optical_frame:
-                  {}
-              camera_usb_plug_link:
-                {}
+                camera_infra2_optical_frame: {}
+              camera_usb_plug_link: {}
       Update Interval: 0
       Value: true
     - Alpha: 1
