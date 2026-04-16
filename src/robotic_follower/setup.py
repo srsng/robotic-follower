@@ -69,9 +69,6 @@ setup(
             "rviz_visualizer=robotic_follower.ros_nodes.visualization.rviz_visualizer_node:main",
             "open3d_visualizer=robotic_follower.ros_nodes.visualization.open3d_visualizer_node:main",
             # === 标定模块节点 ===
-            "calibration_calculator=robotic_follower.ros_nodes.calibration.calculator_node:main",
-            "calibration_result_manager=robotic_follower.ros_nodes.calibration.result_manager_node:main",
-            "calibration_tf_publisher=robotic_follower.ros_nodes.calibration.tf_publisher_node:main",
             "chessboard_tf=robotic_follower.ros_nodes.calibration.chessboard_tf_node:main",
         ],
     },
