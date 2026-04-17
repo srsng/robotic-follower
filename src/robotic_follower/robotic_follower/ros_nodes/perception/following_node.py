@@ -38,12 +38,10 @@
 
 import contextlib
 import math
-from threading import Thread
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped
-from rclpy.callback_groups import ReentrantCallbackGroup
 from std_msgs.msg import Int32
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3DArray
@@ -96,12 +94,8 @@ class FollowingNode(NodeWrapper):
         # 当前选中的目标
         self.selected_track_id: int | None = None
         self.tracked_objects: list[dict] = []
-        self.latest_target_pose: PoseStamped | None = None
 
-        # 运动状态锁
-        self._is_moving = False
-
-        # 初始化 MoveIt2（需要 spinner 运行后才能调用服务）
+        # 初始化 MoveIt2
         self._init_moveit2()
 
         # 启动定时器进行跟随
@@ -125,28 +119,22 @@ class FollowingNode(NodeWrapper):
         end_effector_name = "link6_1_1"
         group_name = "dummy_arm"
 
-        self._callback_group = ReentrantCallbackGroup()
         self.moveit2 = MoveIt2(
             node=self,
             joint_names=joint_names,
             base_link_name=base_link_name,
             end_effector_name=end_effector_name,
             group_name=group_name,
-            callback_group=self._callback_group,
         )
 
         # 设置速度和加速度
         self.moveit2.max_velocity = 0.3
         self.moveit2.max_acceleration = 0.3
 
-        # 在后台线程中 spin node 使 MoveIt2 服务调用得以完成
-        self._executor = rclpy.executors.MultiThreadedExecutor(2)
+        # 使用单线程 executor，MoveIt2 服务调用在 spin 中处理
+        self._executor = rclpy.executors.SingleThreadedExecutor()
         self._executor.add_node(self)
-        self._spin_thread = Thread(target=self._executor.spin, daemon=True, args=())
-        self._spin_thread.start()
 
-        # 等待初始化
-        self.create_rate(1.0).sleep()
         self._info("MoveIt2 初始化完成")
 
     def tracked_callback(self, msg: Detection3DArray):
@@ -182,8 +170,13 @@ class FollowingNode(NodeWrapper):
 
     def selected_callback(self, msg: Int32):
         """选中目标回调。"""
-        self.selected_track_id = msg.data
-        self._info(f"选中目标: track_id={msg.data}")
+        track_id = msg.data
+        if track_id > 0:
+            self.selected_track_id = track_id
+            self._info(f"选中目标: track_id={track_id}")
+        else:
+            self.selected_track_id = None
+            self._info(f"取消跟随")
 
     def _get_end_effector_pose(self) -> np.ndarray | None:
         """获取末端执行器在 base_link 下的位置。"""
@@ -304,7 +297,7 @@ def main(args=None):
     rclpy.init(args=args)
     node = FollowingNode()
     try:
-        rclpy.spin(node)
+        node._executor.spin()
     except KeyboardInterrupt:
         node._info("收到中断信号")
     finally:
