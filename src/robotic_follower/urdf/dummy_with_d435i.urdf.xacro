@@ -4,34 +4,17 @@
 
   机械臂：dummy-ros2 (link6_1_1 为末端)
   相机：realsense2_description sensor_d435i，挂载在 link6_1_1 上
-
-  TF 链路（静态 URDF 定义）：
-    world → base_link → ... → link6_1_1 → camera_link → camera_depth_optical_frame
-                                                     → camera_color_optical_frame
-                                                     → camera_infra1_optical_frame
-                                                     → camera_infra2_optical_frame
-
-  注意：hand_eye_calibration 会动态发布 link6_1_1 → camera_link 的精确变换，
-       覆盖 URDF 中的 nominal extrinsics，供 realsense2_camera 节点使用。
 -->
-<robot name="dummy_with_d435i" xmlns:xacro="http://www.ros.org/wiki/xacro">
+<robot name="dummy_with_d435i"
+  xmlns:xacro="http://www.ros.org/wiki/xacro">
 
   <!-- 1. 机械臂 URDF（包含 world, base_link, link1_1_1 ... link6_1_1）-->
   <xacro:include filename="$(find dummy-ros2_description)/urdf/dummy-ros2.xacro"/>
 
   <!-- 2. D435i 相机，挂在机械臂末端 link6_1_1 上 -->
-  <!--
-    use_nominal_extrinsics:=true 表示使用 URDF 中的名义外参（非精确标定值）。
-    hand_eye_calibration 节点会动态发布精确的 link6_1_1 → camera_link 变换来覆盖它。
-    nominal 外参仅供 RViz 可视化和 TF 查询用。
-  -->
   <xacro:include filename="$(find realsense2_description)/urdf/_d435i.urdf.xacro"/>
-  <xacro:sensor_d435i parent="link6_1_1" name="camera" use_nominal_extrinsics="true">
-    <!--
-      origin: 相机相对于 link6_1_1 的偏移。此处为零，实际偏移由 nominal extrinsics 定义。
-      精确偏移由 hand_eye_calibration 标定后动态发布。
-    -->
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+  <xacro:sensor_d435i parent="link6_1_1" name="camera" use_nominal_extrinsics="false">
+    <origin xyz="0.00 -0.08 0.03" rpy="0 0 -1.5708" />
   </xacro:sensor_d435i>
 
 </robot>
