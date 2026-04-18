@@ -69,8 +69,7 @@ class GroundDetector(AlgorithmStage):
         self._debug(f"points={len(data.points)}, ground_mask={np.sum(ground_mask)}")
 
         # 获取地面点
-        relative_indices = np.where(ground_mask)[0]
-        ground_indices = data.original_indices[relative_indices]
+        ground_indices = np.where(ground_mask)[0]
         ground_points = data.points[ground_mask]
 
         if len(ground_points) > 0:
@@ -93,7 +92,7 @@ class GroundDetector(AlgorithmStage):
                 ground_mask = (z_coords >= ground_height_bottom) & (
                     z_coords <= ground_height_bottom + ground_thickness
                 )
-                ground_indices = data.original_indices[np.where(ground_mask)[0]]
+                ground_indices = np.where(ground_mask)[0]
                 ground_points = data.points[ground_mask]
                 self._debug(
                     f"地面 bbox 下移: actual_bottom={actual_bottom:.4f}, "

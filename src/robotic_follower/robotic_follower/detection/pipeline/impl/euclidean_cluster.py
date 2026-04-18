@@ -47,9 +47,8 @@ class EuclideanCluster(AlgorithmStage):
                 continue
 
             # cluster_indices 是在 remaining_points 中的索引
-            # 需要通过 data.original_indices 转换为原始索引
-            remaining_indices = data.original_indices[np.where(remaining_mask)[0]]
-            actual_indices = remaining_indices[cluster_indices]
+            # actual_indices 是在当前 data.points 中的索引
+            actual_indices = np.where(remaining_mask)[0][cluster_indices]
 
             # 更新 labels
             if len(data.labels) == 0:
