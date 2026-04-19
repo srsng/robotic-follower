@@ -49,6 +49,7 @@ import rclpy
 from ament_index_python import get_package_share_directory
 from geometry_msgs.msg import Point, Quaternion, Vector3
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
@@ -73,11 +74,10 @@ class DetectionNode(NodeWrapper):
         "model",
         "config",
     )
-
-    DEFAULT_CONFIG_NAME = "votenet_config.yaml"
+    # DEFAULT_CONFIG_NAME = "votenet_config.yaml"
     # DEFAULT_CONFIG_NAME = "density_votenet_config.yaml"
     # DEFAULT_CONFIG_NAME = "density_votenet_to_scene-70c.yaml"
-    # DEFAULT_CONFIG_NAME = "ground_cluster.yaml"
+    DEFAULT_CONFIG_NAME = "ground_cluster.yaml"
 
     DEFAULT_CONFIG = os.path.join(DEFAULT_CONFIG_ROOT, DEFAULT_CONFIG_NAME)
 
@@ -203,86 +203,73 @@ class DetectionNode(NodeWrapper):
         else:
             self._error("检测模型未加载")
 
-    def _transform_pointcloud(
-        self, points: np.ndarray, stamp, source_frame: str
-    ) -> np.ndarray | None:
+    def _transform_pointcloud(self, cloud_msg: PointCloud2) -> PointCloud2 | None:
         """将点云从 source_frame 变换到 target_frame。
 
         Args:
-            points: 点云数据 (N, 3)
-            stamp: 点云时间戳
-            source_frame: 点云源坐标系（从点云header获取）
+            cloud_msg: 点云消息
 
         Returns:
-            变换后的点云数据，如果 source_frame == target_frame 则直接返回原始点云
+            变换后的点云消息，如果 source_frame == target_frame 则直接返回原始消息
         """
+        source_frame = cloud_msg.header.frame_id
+
         # 源目标和目标相同时，跳过变换
         if source_frame == self.target_frame:
-            return points
+            return cloud_msg
 
         try:
-            # 查询变换，使用当前时间避免时间同步问题
-            now = rclpy.time.Time(seconds=0)
+            # 1. 查询变换（使用当前时间获取最新可用变换，避免时间戳不匹配）
             transform = self.tf_buffer.lookup_transform(
                 self.target_frame,
                 source_frame,
-                now,
+                rclpy.time.Time(seconds=0),  # 最新可用变换
                 timeout=rclpy.duration.Duration(seconds=1.0),  # type: ignore
             )
         except Exception as e:
             self._warn(f"TF 变换查询失败: {e}")
             return None
 
-        # 提取旋转矩阵和平移向量
+        # 2. 将变换转换为 4x4 变换矩阵
+        t_mat = np.eye(4)
         q = transform.transform.rotation
         t = transform.transform.translation
+        t_mat[:3, :3] = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
+        t_mat[:3, 3] = [t.x, t.y, t.z]
 
-        # 四元数转旋转矩阵
-        q_norm = np.sqrt(q.x**2 + q.y**2 + q.z**2 + q.w**2)
-        q = np.array([q.x, q.y, q.z, q.w]) / q_norm
+        # 3. 读取点云（只取 XYZ 进行变换，保留其他字段）
+        points = pointcloud2_to_numpy(cloud_msg)
+        # 只取前3列（XYZ），其他字段（RGB等）直接保留
+        points_xyz = points[:, :3]
+        extra_fields = points[:, 3:] if points.shape[1] > 3 else None
 
-        # 旋转矩阵 (from tf2)
-        R = np.array(
-            [
-                [
-                    1 - 2 * (q[2] ** 2 + q[3] ** 2),
-                    2 * (q[1] * q[2] - q[0] * q[3]),
-                    2 * (q[1] * q[3] + q[0] * q[2]),
-                ],
-                [
-                    2 * (q[1] * q[2] + q[0] * q[3]),
-                    1 - 2 * (q[1] ** 2 + q[3] ** 2),
-                    2 * (q[2] * q[3] - q[0] * q[1]),
-                ],
-                [
-                    2 * (q[1] * q[3] - q[0] * q[2]),
-                    2 * (q[2] * q[3] + q[0] * q[1]),
-                    1 - 2 * (q[1] ** 2 + q[2] ** 2),
-                ],
-            ]
-        )
-        translation = np.array([t.x, t.y, t.z])
+        # 应用齐次坐标变换
+        points_hom = np.hstack([points_xyz, np.ones((points_xyz.shape[0], 1))])
+        transformed_xyz = (t_mat @ points_hom.T).T[:, :3]
 
-        # 应用变换
-        transformed = (R @ points.T).T + translation
-        return transformed
+        # 4. 重建点云（拼接变换后的 XYZ 和原始额外字段）
+        if extra_fields is not None:
+            transformed_cloud = numpy_to_pointcloud2(
+                np.hstack([transformed_xyz, extra_fields]),
+                frame_id=self.target_frame,
+                stamp=cloud_msg.header.stamp,
+                pack_rgb=False,
+            )
+        else:
+            transformed_cloud = numpy_to_pointcloud2(
+                transformed_xyz,
+                frame_id=self.target_frame,
+                stamp=cloud_msg.header.stamp,
+                pack_rgb=False,
+            )
 
-    def _publish_transformed_pointcloud(
-        self, points: np.ndarray, header, frame_id: str
-    ):
-        """发布变换后的点云（异步，不阻塞检测）。"""
-        try:
-            pc_msg = numpy_to_pointcloud2(points, frame_id=frame_id, pack_rgb=False)
-            pc_msg.header.stamp = header.stamp
-            self.transformed_pc_pub.publish(pc_msg)
-        except Exception as e:
-            self._warn(f"发布变换点云失败: {e}")
+        return transformed_cloud
 
     def pointcloud_callback(self, msg: PointCloud2):
         """点云回调。"""
         self._debug(f"收到点云消息: {msg.width * msg.height} 点")
         if self.detector is None or not self.detector.ready:
-            self._warn("检测器未就绪")
+            self._debug("检测器未就绪")
             return
 
         # 发布 class_names 信息（仅在首次就绪时发布一次）
@@ -291,17 +278,32 @@ class DetectionNode(NodeWrapper):
             self._published_class_names = True
 
         try:
-            points_full = pointcloud2_to_numpy(msg)
+            # 坐标变换：使用 tf2_ros 规范方式变换点云
+            transformed_cloud = self._transform_pointcloud(msg)
+            if transformed_cloud is None:
+                return
+
+            # 发布变换后的点云（直接发布 PointCloud2）
+            self.transformed_pc_pub.publish(transformed_cloud)
+
+            # 将变换后的 PointCloud2 转换为 numpy 用于检测
+            points_full = pointcloud2_to_numpy(transformed_cloud)
             self._debug(
-                f"收到点云: shape={points_full.shape}, dtype={points_full.dtype}"
+                f"变换后点云: shape={points_full.shape}, dtype={points_full.dtype}"
             )
+
+            # 随机下采样到 2 万点
+            max_points = 20000
+            if len(points_full) > max_points:
+                indices = np.random.choice(len(points_full), max_points, replace=False)
+                points_full = points_full[indices]
+                self._debug(f"下采样后: shape={points_full.shape}")
 
             # 保留 RGB 用于可视化，只取 XYZ 用于检测
             has_rgb = points_full.shape[1] > 3
             if has_rgb:
                 self._debug(f"保留 RGB: shape={points_full.shape}")
                 points_xyz = points_full[:, :3]
-                rgb = points_full[:, 3:]
             else:
                 points_xyz = points_full
 
@@ -309,27 +311,12 @@ class DetectionNode(NodeWrapper):
                 self._warn("点云点数过少，跳过检测")
                 return
 
-            # 坐标变换：自动从点云header.frame_id变换到target_frame
-            transformed_xyz = self._transform_pointcloud(
-                points_xyz, msg.header.stamp, msg.header.frame_id
-            )
-            if transformed_xyz is None:
-                self._warn("点云变换失败，跳过本帧")
-                return
-
-            # 发布变换后的点云（保留 RGB 用于可视化）
-            if has_rgb:
-                transformed_full = np.column_stack([transformed_xyz, rgb])
-            else:
-                transformed_full = transformed_xyz
-            self._publish_transformed_pointcloud(
-                transformed_full, msg.header, self.target_frame
-            )
-
-            detections = self.detector.detect(transformed_xyz)
+            detections = self.detector.detect(points_xyz)
             self._debug(f"检测到 {len(detections)} 个目标")
             if detections:
-                detection_msg = self._create_detection_msg(detections, msg.header)
+                detection_msg = self._create_detection_msg(
+                    detections, transformed_cloud.header
+                )
                 self.detections_pub.publish(detection_msg)
                 self._debug("已发布检测结果")
 
@@ -342,7 +329,7 @@ class DetectionNode(NodeWrapper):
         msg.header = header
         msg.header.frame_id = self.target_frame
 
-        for det in detections:
+        for i, det in enumerate(detections):
             detection = Detection3D()
             bbox = det["bbox"]
             # 所有检测器输出的 bbox 格式均为 [x, y, z, dx, dy, dz, yaw]，z 为几何中心
@@ -350,10 +337,13 @@ class DetectionNode(NodeWrapper):
             detection.bbox.size = Vector3(x=bbox[3], y=bbox[4], z=bbox[5])
             detection.bbox.center.orientation = self._yaw_to_quaternion(bbox[6])
 
+            # 帧内检测索引作为临时 id（追踪节点会替换为 track_id）
+            detection.id = str(i)
+
             from vision_msgs.msg import ObjectHypothesisWithPose
 
             hypothesis = ObjectHypothesisWithPose()
-            hypothesis.hypothesis.class_id = str(det["label"])
+            hypothesis.hypothesis.class_id = det.get("name", str(det["label"]))
             hypothesis.hypothesis.score = det["score"]
             detection.results.append(hypothesis)
             msg.detections.append(detection)
