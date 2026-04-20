@@ -155,15 +155,21 @@ class FollowingNode(NodeWrapper):
             cosy_spawn = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             yaw = math.atan2(siny_spawn, cosy_spawn)
 
-            # 提取 track_id
+            # 提取 track_id（从 Detection3D.id 字段）
             track_id = None
+            if det.id:
+                with contextlib.suppress(ValueError):
+                    track_id = int(det.id)
+
+            # 提取类别标签
+            label = "unknown"
             if det.results:
-                with contextlib.suppress(ValueError, IndexError):
-                    track_id = int(det.results[0].hypothesis.class_id)
+                label = det.results[0].hypothesis.class_id
 
             self.tracked_objects.append(
                 {
                     "track_id": track_id,
+                    "label": label,
                     "bbox": [x, y, z, dx, dy, dz, yaw],
                 }
             )

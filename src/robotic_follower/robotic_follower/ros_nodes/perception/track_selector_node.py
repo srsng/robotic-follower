@@ -77,21 +77,30 @@ class TrackSelectorNode(NodeWrapper):
                 bbox.center.position.z,
             )
 
-            # 提取 track_id
+            # 提取 track_id（从 Detection3D.id 字段）
             track_id = None
+            if det.id:
+                try:
+                    track_id = int(det.id)
+                except ValueError:
+                    pass
+
+            # 提取类别标签（从 class_id 字段）
             label = "unknown"
             if det.results:
-                try:
-                    track_id = int(det.results[0].hypothesis.class_id)
-                    label = str(det.results[0].hypothesis.class_id)
-                except (ValueError, IndexError):
-                    pass
+                label = det.results[0].hypothesis.class_id
+
+            # 提取目标尺寸
+            dx = det.bbox.size.x
+            dy = det.bbox.size.y
+            dz = det.bbox.size.z
 
             self._tracked_objects.append(
                 {
                     "track_id": track_id,
                     "label": label,
                     "position": (x, y, z),
+                    "size": (dx, dy, dz),
                 }
             )
 

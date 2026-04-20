@@ -159,16 +159,23 @@ class Open3DVisualizerNode(NodeWrapper):
 
                 bbox = [pos.x, pos.y, pos.z, size.x, size.y, size.z, yaw]
 
-                label = -1
+                label = "unknown"
                 score = 0.0
+                track_id = None
                 if len(det_msg.results) > 0:
-                    try:
-                        label = int(det_msg.results[0].hypothesis.class_id)
-                    except ValueError:
-                        label = -1
+                    label = det_msg.results[0].hypothesis.class_id
                     score = det_msg.results[0].hypothesis.score
 
-                detections.append({"bbox": bbox, "label": label, "score": score})
+                # 从 Detection3D.id 字段提取 track_id
+                if det_msg.id:
+                    track_id = det_msg.id
+
+                detections.append({
+                    "bbox": bbox,
+                    "label": label,
+                    "score": score,
+                    "track_id": track_id,
+                })
 
             with self.data_lock:
                 self.current_detections = detections
@@ -344,14 +351,28 @@ def main(args=None):
             mat_bbox.line_width = 2.0
             widget3d.scene.add_geometry(f"BBox_{i}", bbox_lineset, mat_bbox)
 
-            label_idx = det.get("label", -1)
-            if class_names_received and 0 <= label_idx < len(class_names):
-                label_name = class_names[label_idx]
-            else:
-                label_name = f"Obj_{label_idx}"
+            label = det.get("label", "unknown")
+            track_id = det.get("track_id")
+
+            # 将 label 解析为可读名称：
+            # 如果 label 是数字字符串（类别索引），尝试查 class_names 表；
+            # 否则直接使用字符串（已经是类名如 "ground", "cluster_0"）
+            try:
+                label_idx = int(label)
+                if class_names_received and 0 <= label_idx < len(class_names):
+                    label_name = class_names[label_idx]
+                else:
+                    label_name = f"Obj_{label_idx}"
+            except (ValueError, TypeError):
+                label_name = label
+
             score = det.get("score", 0.0)
-            text = f"{label_name}: {score:.2f}"
-            detection_texts.append(f"[{i + 1}] {label_name} ({score:.2f})")
+            if track_id:
+                text = f"#{track_id} {label_name}: {score:.2f}"
+                detection_texts.append(f"#{track_id} {label_name} ({score:.2f})")
+            else:
+                text = f"{label_name}: {score:.2f}"
+                detection_texts.append(f"[{i + 1}] {label_name} ({score:.2f})")
 
             bbox_arr = det.get("bbox", [0, 0, 0, 0, 0, 0, 0])
             bbox_center = np.array(bbox_arr[:3])

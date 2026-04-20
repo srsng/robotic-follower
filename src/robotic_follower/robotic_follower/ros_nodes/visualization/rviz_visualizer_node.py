@@ -268,14 +268,18 @@ class RVizVisualizerNode(NodeWrapper):
         marker.color.b = 1.0
         marker.color.a = 1.0
 
-        # 提取类别和置信度
+        # 提取追踪 ID、类别和置信度
+        track_id = det.id if det.id else None
         class_id = "Unknown"
         score = 0.0
         if det.results:
             class_id = det.results[0].hypothesis.class_id
             score = det.results[0].hypothesis.score
 
-        marker.text = f"{class_id} {score:.2f}"
+        if track_id:
+            marker.text = f"#{track_id} {class_id} {score:.2f}"
+        else:
+            marker.text = f"{class_id} {score:.2f}"
         return marker
 
     def depth_callback(self, msg: Image):

@@ -143,7 +143,6 @@ class TrackingNode(NodeWrapper):
         """创建跟踪消息。"""
         msg = Detection3DArray()
         msg.header = header
-        msg.header.frame_id = "camera_depth_optical_frame"
 
         for obj in tracked_objects:
             detection = Detection3D()
@@ -151,6 +150,9 @@ class TrackingNode(NodeWrapper):
             detection.bbox.center.position = Point(x=bbox[0], y=bbox[1], z=bbox[2])
             detection.bbox.size = Vector3(x=bbox[3], y=bbox[4], z=bbox[5])
             detection.bbox.center.orientation = self._yaw_to_quaternion(bbox[6])
+
+            # 使用 Detection3D.id 承载唯一 track_id
+            detection.id = str(obj["track_id"])
 
             hypothesis = ObjectHypothesisWithPose()
             hypothesis.hypothesis.class_id = str(obj["label"])

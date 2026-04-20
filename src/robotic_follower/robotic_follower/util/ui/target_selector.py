@@ -11,6 +11,9 @@ from robotic_follower.util.handler import NodeHandler
 class TargetSelectorUI(NodeHandler):
     """目标选择器 UI"""
 
+    # 列表刷新最小间隔（毫秒），避免刷新过快导致选中丢失
+    REFRESH_INTERVAL_MS = 200
+
     def __init__(
         self,
         on_select: Callable[[int], None] | None = None,
@@ -27,6 +30,8 @@ class TargetSelectorUI(NodeHandler):
         self._tracked_objects: list[dict] = []
         self._selected_track_id: int | None = None
         self._running = True
+        self._refresh_scheduled = False
+        self._last_display_items: list[str] = []
 
         self._create_gui()
 
@@ -101,44 +106,91 @@ class TargetSelectorUI(NodeHandler):
         """更新目标列表
 
         Args:
-            targets: 目标列表，每个元素包含 track_id, label, position
+            targets: 目标列表，每个元素包含 track_id, label, position, size
         """
         self._tracked_objects = targets
-        self._refresh_list()
+        self._schedule_refresh()
+
+    def _schedule_refresh(self):
+        """安排刷新，避免过于频繁导致选中状态丢失。"""
+        if self._refresh_scheduled:
+            return
+        self._refresh_scheduled = True
+        self.root.after(self.REFRESH_INTERVAL_MS, self._do_scheduled_refresh)
 
     def set_selected(self, track_id: int | None):
-        """设置当前选中的目标
-
-        Args:
-            track_id: 选中的 track_id，None 表示无选中
-        """
+        """设置当前选中的目标（由 ROS 回调触发，需要节流刷新）。"""
         self._selected_track_id = track_id
         self._refresh_list()
 
-    def _refresh_list(self):
-        """刷新目标列表"""
+    def _force_refresh(self):
+        """强制立即刷新列表（选中操作时调用，确保用户反馈即时）。"""
         if not hasattr(self, "listbox"):
             return
-        self.root.after(0, self._do_refresh_list)
+        # 取消待执行的节流刷新
+        self._refresh_scheduled = False
+        self._do_refresh_now()
 
-    def _do_refresh_list(self):
-        """在主线程中刷新列表"""
+    def _do_refresh_now(self):
+        """立即重建列表内容。"""
+        # 记住当前选中位置
+        selected_indices = self.listbox.curselection()
+
         self.listbox.delete(0, tk.END)
 
-        for obj in self._tracked_objects:
+        new_items = []
+        for i, obj in enumerate(self._tracked_objects):
             track_id = obj["track_id"]
             label = obj["label"]
             x, y, z = obj["position"]
-            display = f"[{track_id}] {label} @ ({x:.2f}, {y:.2f}, {z:.2f})"
+            dx, dy, dz = obj.get("size", (0, 0, 0))
+            display = f"#{track_id} {label} ({dx:.2f}x{dy:.2f}x{dz:.2f}) @ ({x:.2f}, {y:.2f}, {z:.2f})"
             self.listbox.insert(tk.END, display)
 
             # 高亮当前选中的目标
             if track_id == self._selected_track_id:
                 self.listbox.itemconfig(
-                    tk.END, {"fg": "blue", "selectforeground": "blue"}
+                    i, {"fg": "blue", "selectforeground": "blue"}
                 )
 
+            new_items.append(display)
+
+        self._last_display_items = new_items
+
+        # 恢复选中状态
+        if selected_indices:
+            for idx in selected_indices:
+                if idx < self.listbox.size():
+                    self.listbox.selection_set(idx)
+
         self._update_status()
+
+    def _refresh_list(self):
+        """刷新目标列表"""
+        if not hasattr(self, "listbox"):
+            return
+        self._schedule_refresh()
+
+    def _do_scheduled_refresh(self):
+        """定时刷新回调：只在内容实际变化时才重建列表。"""
+        self._refresh_scheduled = False
+
+        # 生成新的显示文本列表用于对比
+        new_items = []
+        for obj in self._tracked_objects:
+            track_id = obj["track_id"]
+            label = obj["label"]
+            x, y, z = obj["position"]
+            dx, dy, dz = obj.get("size", (0, 0, 0))
+            new_items.append(
+                f"#{track_id} {label} ({dx:.2f}x{dy:.2f}x{dz:.2f}) @ ({x:.2f}, {y:.2f}, {z:.2f})"
+            )
+
+        # 内容没有变化时跳过重建，保留当前选中状态
+        if new_items == self._last_display_items:
+            return
+
+        self._do_refresh_now()
 
     def _update_status(self):
         """更新状态显示"""
@@ -146,7 +198,7 @@ class TargetSelectorUI(NodeHandler):
             for obj in self._tracked_objects:
                 if obj["track_id"] == self._selected_track_id:
                     self.status_label.config(
-                        text=f"[{obj['track_id']}] {obj['label']}",
+                        text=f"#{obj['track_id']} {obj['label']}",
                         foreground="green",
                     )
                     return
@@ -192,7 +244,8 @@ class TargetSelectorUI(NodeHandler):
         else:
             self._selected_track_id = None
 
-        self._refresh_list()
+        # 用户操作需要即时反馈，使用强制刷新
+        self._force_refresh()
 
         if self._on_select:
             self._on_select(track_id)
