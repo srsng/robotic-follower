@@ -1,8 +1,19 @@
+"""动态模块导入工具."""
+
 import importlib
 from pathlib import Path
 
 
 def load_var_from_file(file_path, var_name: list[str]) -> dict:
+    """从 Python 文件动态加载变量.
+
+    Args:
+        file_path: Python 文件路径
+        var_name: 要加载的变量名列表
+
+    Returns:
+        dict: 变量名到值的映射（未找到则为 None）
+    """
     if not str(file_path).endswith(".py"):
         return {}
 

@@ -9,15 +9,16 @@ V = TypeVar("V", str, int, float, bool, list)
 
 
 class NodeWrapper(Node, NodeHandler):
-    """ROS Node 封装类，同时具备 Node 能力和简化的日志接口。
+    """ROS Node 封装类，同时具备 Node 能力和简化的日志接口.
 
-    使用方式:
-        class MyNode(NodeWrapper):
-            def __init__(self):
-                super().__init__("my_node")
-                self._info("节点启动")  # 直接使用简化日志
-                # 声明类型并返回值，附带类型
-                self.var = self.declare_and_get_parameter("paramter_name", some_default)
+    Usage:
+    ```
+    class MyNode(NodeWrapper):
+        def __init__(self):
+            super().__init__("my_node")
+            self._info("node started")
+            self.var = self.declare_and_get_parameter("parameter_name", some_default)
+    ```
     """
 
     def __init__(self, node_name: str, **kwargs):
@@ -26,12 +27,12 @@ class NodeWrapper(Node, NodeHandler):
         self._filter_warnings()
 
     def _check_type(self, value, expected) -> bool:
-        """递归检查 value 是否符合 expected 类型。
+        """递归检查 value 是否符合 expected 类型.
 
-        支持：
-        - 基础类型：str, int, float, bool
-        - list[inner]：验证所有元素类型一致
-        - list[list[...]]：递归验证嵌套列表
+        Supports:
+        - 基础类型: str, int, float, bool
+        - list[inner]: 验证所有元素类型一致
+        - list[list[...]]: 递归验证嵌套列表
         """
         if expected in (str, int, float, bool):
             return isinstance(value, expected)
@@ -50,10 +51,10 @@ class NodeWrapper(Node, NodeHandler):
         return True
 
     def get_parameter_val_typed(self, name: str, expected_type: type[V]) -> V:
-        """获取参数值，并断言其类型为 expected_type。
+        """获取参数值，并断言其类型为 expected_type.
 
-        expected_type 可以是基础类型（str/int/float/bool）或泛型类型（list[float]、
-        list[list[float]] 等）。
+        expected_type 可以是基础类型（str/int/float/bool）或泛型类型（list[float],
+        list[list[float]], etc.）.
         """
         param = self.get_parameter(name)
         if param.type_ == Parameter.Type.NOT_SET:
@@ -76,13 +77,13 @@ class NodeWrapper(Node, NodeHandler):
         default_value: V,
         expected_type: type[V] | None = None,
     ) -> V:
-        """声明并获取参数。
+        """声明并获取参数, 简单类型会自动推断类型.
 
         Args:
-            name: 参数名
-            default_value: 默认值，用于 declare 也用于类型推断
-            expected_type: 期望的类型，用于类型断言, 默认使用 type(default_value),
-                若是list[float]、list[list[float]] 等嵌套类型, 需要手动传入确定类型
+            name: parameter name
+            default_value: 默认值, 用于 declaration 也用于类型推断
+            expected_type: 期望的类型, 用于类型断言. 默认为 type(default_value).
+                若是 list[float] 或 list[list[float]] 等嵌套类型, 需要手动传入
         """
         self.declare_parameter(name, default_value)
         if expected_type is None:
@@ -91,7 +92,7 @@ class NodeWrapper(Node, NodeHandler):
 
     @staticmethod
     def _filter_warnings():
-        """过滤底层库已知的无害警告"""
+        """过滤底层库已知的无害警告."""
         import warnings
 
         messages = [

@@ -36,9 +36,9 @@ def log_level_lower(
     level: str,
     logger_level: int | None = None,
 ) -> bool:
-    """日志等级比较函数
+    """日志等级比较函数.
 
-    若level低于logger_level，则返回True
+    若 level 低于 logger_level, 则返回 True.
     """
     msg_level = _LEVEL_TO_INT.get(level.lower(), DEFAUL_LOG_LEVEL)
     return bool(logger_level is not None and msg_level < logger_level)
@@ -67,7 +67,7 @@ def _log_by_print(
     fmt: str | None = None,
     logger_level: int | None = None,
 ):
-    """log的辅助函数"""
+    """log 辅助函数: 使用 print 输出日志."""
     if log_level_lower(level, logger_level):
         return
 
@@ -97,7 +97,7 @@ def _log_by_ros_logger(
     fmt: str | None = None,
     logger_level: int | None = None,
 ):
-    """log的辅助函数: 使用 ROS2 logger 输出日志。"""
+    """log 辅助函数: 使用 ROS2 logger 输出日志."""
     try:
         getattr(ros_logger, level)(_rich_log_text(msg, level))
     except ValueError as e:
@@ -116,14 +116,14 @@ def log(
     fmt: str | None = None,
     call: LogCallback | None = None,
 ):
-    """安全的日志输出：当有父节点时，使用父节点的日志函数，否则使用 print
+    """安全的日志输出: 当有父节点时, 使用父节点的日志函数, 否则使用 print.
 
     Args:
-        level (str): 日志等级. Should be in ("debug", "info", "warn", "error", "fatal")
-        msg (str): 消息
-        node (rclpy.node.Node, optional): 可选的父节点. Defaults to None.
-        fmt (str, optional): 没有父节点时 print 的格式化，支持 {time} {level} 和 {message}. Defaults to "[{time}][{level}] {message}".
-        call Callable[[Level, Msg], None] | None: 日志回调，两个参数分别是 `level`, `msg`. Defaults to None.
+        level: 日志等级. Should be in ("debug", "info", "warn", "error", "fatal")
+        msg: 消息
+        node: 父节点用于日志输出. Defaults to None.
+        fmt: print 输出的格式化字符串, 支持 {time}, {level}, {message}
+        call: 日志回调, 参数为 (level, msg). Defaults to None.
     """
     level_ok = True
     if level.lower() not in VALID_LOG_LEVEL:

@@ -7,7 +7,9 @@ from launch.substitutions import LaunchConfiguration
 
 
 def to_urdf(xacro_path, parameters=None):
-    """将 xacro 文件转换为 URDF 文件
+    """将 xacro 文件转换为 URDF 文件.
+
+    Example:
     ```
     some_xacro = os.path.join(
         get_package_share_directory("xxx_description"),
@@ -31,7 +33,9 @@ def to_urdf(xacro_path, parameters=None):
 
 
 def set_configurable_parameters(local_params):
-    """设置launch参数
+    """设置 launch 参数.
+
+    Example:
     ```
     local_parameters = [{
             "name": "use_sim_time",
@@ -46,7 +50,9 @@ def set_configurable_parameters(local_params):
 
 
 def declare_configurable_parameters(local_params):
-    """声明launch参数
+    """声明 launch 参数.
+
+    Example:
     ```
     local_parameters = [{
             "name": "use_sim_time",
