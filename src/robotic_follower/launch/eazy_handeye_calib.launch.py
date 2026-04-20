@@ -11,7 +11,7 @@
 5. rqt_image_view (图像可视化)
 
 启动命令：
-    ros2 launch robotic_follower hand_eye_easy_calibration.launch.py
+    ros2 launch robotic_follower eazy_handeye_calib.launch.py
 """
 
 from launch.actions import IncludeLaunchDescription, TimerAction
@@ -29,7 +29,7 @@ def generate_launch_description():
     # TF 帧名
     robot_base_frame = "base_link"
     robot_effector_frame = "link6_1_1"
-    tracking_base_frame = "camera_color_optical_frame"
+    tracking_base_frame = "camera_link"
     tracking_marker_frame = "chessboard_marker"
 
     # 2. Include demo_real_arm.launch.py (MoveIt + RViz + robot_state_publisher 发布机械臂 TF)
@@ -57,7 +57,7 @@ def generate_launch_description():
             "pointcloud.enable": "true",
             "enable_color": "true",
             "enable_depth": "true",
-            "depth_module.profile": "640x480x30",
+            "depth_module.profile": "640x480x10",
             "rgb_camera.profile": "640x480x30",
             "camera_namespace": "camera",
             "publish_tf": "true",
@@ -65,7 +65,8 @@ def generate_launch_description():
     )
 
     # 5. 棋盘格检测 → 发布 TF
-    # 订阅话题: /camera/color/image_raw, /camera/color/camera_info
+    # PnP 在图像帧下解算，自动通过 TF 变换到 tracking_base_frame (camera_link) 后发布
+    # 订阅话题: /camera/camera/color/image_raw, /camera/camera/color/camera_info
     chessboard_tf_node = Node(
         package="robotic_follower",
         executable="chessboard_tf",
@@ -114,10 +115,10 @@ def generate_launch_description():
             # 相机（publish_tf=true，发布相机 TF）
             realsense_launch,
             # 棋盘格检测
-            TimerAction(period=7.0, actions=[chessboard_tf_node]),
+            TimerAction(period=2.0, actions=[chessboard_tf_node]),
             # rqt_image_view 图像可视化
-            TimerAction(period=2.0, actions=[rqt_image_view_node]),
+            TimerAction(period=1.0, actions=[rqt_image_view_node]),
             # easy_handeye2 标定 GUI (包含 handeye_server + rqt_calibrator)
-            TimerAction(period=10.0, actions=[easy_calibrate_launch]),
+            TimerAction(period=3.0, actions=[easy_calibrate_launch]),
         ]
     )

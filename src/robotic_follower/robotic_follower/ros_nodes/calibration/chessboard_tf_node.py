@@ -2,7 +2,10 @@
 """棋盘格检测节点 - 发布 TF 供 easy_handeye2 使用。
 
 订阅相机图像，检测棋盘格，发布 TF：
-    tracking_base_frame (camera_color_optical_frame) → tracking_marker_frame (chessboard_marker)
+    tracking_base_frame (camera_link) → tracking_marker_frame (chessboard_marker)
+
+PnP 解算在图像帧 (msg.header.frame_id) 下进行（因为相机内参对应光学坐标系），
+然后通过查询 TF 将位姿变换到 tracking_base_frame 下发布。
 
 同时发布 /chessboard_pose 用于 UI 显示。
 
@@ -10,9 +13,11 @@
     - chessboard_cols: 内部角点列数 (默认 11)
     - chessboard_rows: 内部角点行数 (默认 8)
     - square_size: 格子尺寸，米 (默认 0.02)
-    - tracking_base_frame: TF 父帧 (默认 camera_color_optical_frame)
+    - tracking_base_frame: TF 父帧 (默认 camera_link)
     - tracking_marker_frame: TF 子帧 (默认 chessboard_marker)
 """
+
+import time
 
 import cv2
 import numpy as np
@@ -21,7 +26,7 @@ from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
-from tf2_ros import TransformBroadcaster
+from tf2_ros import Buffer, TransformBroadcaster, TransformListener
 
 from robotic_follower.util.wrapper import NodeWrapper
 
@@ -39,7 +44,7 @@ class ChessboardTFNode(NodeWrapper):
 
         # TF 帧名
         self.tracking_base_frame = self.declare_and_get_parameter(
-            "tracking_base_frame", "camera_color_optical_frame"
+            "tracking_base_frame", "camera_link"
         )
         self.tracking_marker_frame = self.declare_and_get_parameter(
             "tracking_marker_frame", "chessboard_marker"
@@ -67,6 +72,10 @@ class ChessboardTFNode(NodeWrapper):
 
         # TF 广播器
         self.tf_broadcaster = TransformBroadcaster(self)
+
+        # TF 查询（用于将位姿从 optical_frame 变换到 tracking_base_frame）
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # 订阅
         self.image_sub = self.create_subscription(
@@ -101,6 +110,8 @@ class ChessboardTFNode(NodeWrapper):
 
         # 超时检查定时器
         self._timer = self.create_timer(5.0, self._check_camera_info)
+
+        self._last_log_time = 0
 
     def _check_camera_info(self) -> None:
         if not self._camera_info_received:
@@ -166,31 +177,67 @@ class ChessboardTFNode(NodeWrapper):
         R, _ = cv2.Rodrigues(rvec)
         q = self._rotation_matrix_to_quaternion(R)
 
-        self._info(
-            f"棋盘格检测成功, t=[{float(tvec[0]):.3f}, {float(tvec[1]):.3f}, {float(tvec[2]):.3f}]"
-        )
+        # PnP 在图像帧下解算，需要变换到 tracking_base_frame
+        image_frame = msg.header.frame_id
+        if image_frame != self.tracking_base_frame:
+            # 构造图像帧下的位姿矩阵
+            T_image = np.eye(4)
+            T_image[:3, :3] = R
+            T_image[:3, 3] = tvec.flatten()
 
-        # 发布 TF
+            # 查询 image_frame → tracking_base_frame 变换
+            try:
+                tf_image_to_base = self.tf_buffer.lookup_transform(
+                    self.tracking_base_frame,
+                    image_frame,
+                    msg.header.stamp,
+                    timeout=rclpy.duration.Duration(seconds=0.1),
+                )
+            except Exception:
+                self._publish_status("tf_lookup_failed")
+                return
+
+            # 提取变换矩阵
+            T_base_from_image = self._transform_to_matrix(tf_image_to_base.transform)
+            # T_base = T_base_from_image @ T_image
+            T_base = T_base_from_image @ T_image
+
+            R = T_base[:3, :3]
+            tvec_flat = T_base[:3, 3]
+            q = self._rotation_matrix_to_quaternion(R)
+        else:
+            tvec_flat = tvec.flatten()
+
+        if self._last_log_time + 1 < time.time():
+            self._info(
+                f"棋盘格检测成功 ({self.tracking_base_frame}), "
+                f"t=[{float(tvec_flat[0]):.3f}, {float(tvec_flat[1]):.3f}, {float(tvec_flat[2]):.3f}]"
+            )
+
+        # 发布 TF（使用图像时间戳，确保与 easy_handeye2 时间同步）
         t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.stamp = msg.header.stamp
         t.header.frame_id = self.tracking_base_frame
         t.child_frame_id = self.tracking_marker_frame
-        t.transform.translation.x = float(tvec[0])
-        t.transform.translation.y = float(tvec[1])
-        t.transform.translation.z = float(tvec[2])
+        t.transform.translation.x = float(tvec_flat[0])
+        t.transform.translation.y = float(tvec_flat[1])
+        t.transform.translation.z = float(tvec_flat[2])
         t.transform.rotation.x = q[0]
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
         self.tf_broadcaster.sendTransform(t)
-        self._info(f"TF 已发布: {t.header.frame_id} → {t.child_frame_id}")
+
+        if self._last_log_time + 1 < time.time():
+            self._info(f"TF 已发布: {t.header.frame_id} → {t.child_frame_id}")
+            self._last_log_time = time.time()
 
         # 发布 PoseStamped (供 UI)
         pose_msg = PoseStamped()
         pose_msg.header = t.header
-        pose_msg.pose.position.x = float(tvec[0])
-        pose_msg.pose.position.y = float(tvec[1])
-        pose_msg.pose.position.z = float(tvec[2])
+        pose_msg.pose.position.x = float(tvec_flat[0])
+        pose_msg.pose.position.y = float(tvec_flat[1])
+        pose_msg.pose.position.z = float(tvec_flat[2])
         pose_msg.pose.orientation.x = q[0]
         pose_msg.pose.orientation.y = q[1]
         pose_msg.pose.orientation.z = q[2]
@@ -198,6 +245,35 @@ class ChessboardTFNode(NodeWrapper):
         self.pose_pub.publish(pose_msg)
 
         self._publish_status("ok")
+
+    @staticmethod
+    def _transform_to_matrix(transform) -> np.ndarray:
+        """将 ROS TransformStamped.transform 转为 4x4 齐次矩阵。"""
+        T = np.eye(4)
+        T[0, 3] = transform.translation.x
+        T[1, 3] = transform.translation.y
+        T[2, 3] = transform.translation.z
+        q = [
+            transform.rotation.x,
+            transform.rotation.y,
+            transform.rotation.z,
+            transform.rotation.w,
+        ]
+        R = ChessboardTFNode._quaternion_to_rotation_matrix(q)
+        T[:3, :3] = R
+        return T
+
+    @staticmethod
+    def _quaternion_to_rotation_matrix(q: list) -> np.ndarray:
+        """四元数 [x, y, z, w] 转 3x3 旋转矩阵。"""
+        x, y, z, w = q
+        return np.array(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+                [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+                [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+            ]
+        )
 
     def _rotation_matrix_to_quaternion(self, R: np.ndarray) -> tuple:
         trace = np.trace(R)
