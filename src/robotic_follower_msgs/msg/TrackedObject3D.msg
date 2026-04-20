@@ -1,0 +1,9 @@
+int32 tracking_id
+geometry_msgs/Point center
+geometry_msgs/Vector3 size
+float32 yaw
+float32 score
+float32 occlusion_ratio
+bool is_stale
+bool graspable
+string label
