@@ -45,21 +45,14 @@ ros2 pkg create package_name --build-type ament_cmake [...options]
 # 确保在 workspace 根目录
 cd ~/ros2_ws
 
-# 加载 ROS2 环境
-source /opt/ros/humble/setup.bash
-
 # 编译所有包（使用符号链接，便于开发）
 colcon build --symlink-install
 
 # 只编译特定包
 colcon build --symlink-install --packages-select package_name
-
-# 编译并显示详细信息
-colcon build --symlink-install --event-handlers console_direct+
-
-# 编译后加载环境
-source install/setup.bash
 ```
+
+项目使用 `colcon build --symlink-install` 编译，所有更改都通过链接自动反应在build目录中。当且仅当有文件增减时，需要重新编译，否则不要编译.
 
 ### 3. 运行节点
 
@@ -218,29 +211,8 @@ cd ~/ws/py/mmdetection3d
 # 基线 VoteNet 训练
 python3 tools/train.py ~/ros2_ws/src/perception/configs/votenet_sunrgbd_baseline.py
 
-# 密度融合 VoteNet 训练
-python3 tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py
-
-# 多 GPU 训练
-bash tools/dist_train.sh ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py 2
-
 # 继续训练
-python3 tools/train.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
-    --resume work_dirs/density_votenet_sunrgbd/latest.pth
-```
-
-### 评估模型
-
-```bash
-cd ~/ws/py/mmdetection3d
-
-# 评估模型
-python3 tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
-    work_dirs/density_votenet_sunrgbd/best.pth
-
-# 可视化评估结果
-python3 tools/test.py ~/ros2_ws/src/perception/configs/density_votenet_sunrgbd.py \
-    work_dirs/density_votenet_sunrgbd/best.pth --show
+python3 tools/train.py ~/ros2_ws/src/perception/configs/votenet_sunrgbd_baseline.py --resume
 ```
 
 ## 调试工具
@@ -296,13 +268,11 @@ ros2 run robotic_follower node_name --ros-args --log-level logger_name:=debug
 
 ### 常见问题
 
-| 问题           | 原因           | 解决方案                    |
-| -------------- | -------------- | --------------------------- |
-| 节点无法启动   | ROS2环境未加载 | `source install/setup.bash` |
-| 模块编译失败   | 依赖缺失       | 检查 package.xml 并安装依赖 |
-| TF查询失败     | TF未发布       | 检查 TF树和坐标系名称       |
-| 相机未连接     | USB权限不足    | 配置 udev 规则              |
-| Gazebo加载失败 | URDF错误       | 检查 URDF 文件语法          |
+| 问题         | 原因        | 解决方案                    |
+| ------------ | ----------- | --------------------------- |
+| 模块编译失败 | 依赖缺失    | 检查 package.xml 并安装依赖 |
+| TF查询失败   | TF未发布    | 检查 TF树和坐标系名称       |
+| 相机未连接   | USB权限不足 | 配置 udev 规则              |
 
 ### 调试 TF 问题
 
@@ -405,12 +375,12 @@ camera_depth_optical_frame (深度相机光学坐标系，由 realsense2_camera 
 
 ### TF 发布方式说明
 
-| TF 变换                       | 发布者                     | 方式                     |
-| ----------------------------- | -------------------------- | ------------------------ |
-| world → base_link             | static_transform_publisher | 静态 (固定)              |
-| base_link → link6_1_1         | robot_state_publisher      | 动态 (基于 joint_states) |
-| link6_1_1 → camera_link       | hand_eye_calibration       | 动态 (10Hz周期发布)      |
-| camera_link → *_optical_frame | realsense2_camera          | 静态/动态 (相机内部变换) |
+| TF 变换                       | 发布者                     | 方式                        |
+| ----------------------------- | -------------------------- | --------------------------- |
+| world → base_link             | static_transform_publisher | 静态 (固定)                 |
+| base_link → link6_1_1         | robot_state_publisher      | 动态 (基于 joint_states)    |
+| link6_1_1 → camera_link       | hand_eye_calibration       | 静态 (标定后写入到URDF文件) |
+| camera_link → *_optical_frame | realsense2_camera          | 静态/动态 (相机内部变换)    |
 
 ## 文档
 
