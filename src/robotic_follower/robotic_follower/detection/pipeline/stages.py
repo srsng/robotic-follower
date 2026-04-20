@@ -86,12 +86,16 @@ class PreProcessor(PipelineStage):
             )
             return data
 
+        prev_original_indices = data.original_indices
         filtered_points, keep_indices = self.filter(data.points)
 
         # 过滤后所有点都有效，因此掩码全为 True
-        # 新的 original_indices 建立了"过滤后点 → 过滤前点"的直接映射
+        # original_indices 保持到初始输入点云的映射
         data.point_mask = np.ones(len(filtered_points), dtype=bool)
-        data.original_indices = np.arange(len(filtered_points), dtype=np.int64)
+        if len(prev_original_indices) == len(data.points):
+            data.original_indices = prev_original_indices[keep_indices]
+        else:
+            data.original_indices = keep_indices.astype(np.int64, copy=False)
 
         # 过滤标签（如果有）
         if len(data.labels) > 0:
