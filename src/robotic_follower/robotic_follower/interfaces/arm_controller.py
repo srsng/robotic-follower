@@ -20,7 +20,6 @@ from moveit_msgs.msg import (
 )
 from moveit_msgs.srv import GetMotionPlan
 from rclpy.action import ActionClient
-from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
 from std_srvs.srv import SetBool

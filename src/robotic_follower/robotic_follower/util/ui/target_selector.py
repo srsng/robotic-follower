@@ -149,9 +149,7 @@ class TargetSelectorUI(NodeHandler):
 
             # 高亮当前选中的目标
             if track_id == self._selected_track_id:
-                self.listbox.itemconfig(
-                    i, {"fg": "blue", "selectforeground": "blue"}
-                )
+                self.listbox.itemconfig(i, {"fg": "blue", "selectforeground": "blue"})
 
             new_items.append(display)
 

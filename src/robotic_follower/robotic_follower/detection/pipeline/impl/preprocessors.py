@@ -34,6 +34,10 @@ class RadiusFilter(PreProcessor):
 
         # 返回过滤后的点和保留点的索引
         indices = np.where(mask)[0]
+        self._debug(
+            f"RadiusFilter: {len(points)} -> {len(indices)} points "
+            f"(range=[{self.min_distance:.2f}, {self.max_distance:.2f}]m)"
+        )
         return points[mask], indices
 
 
@@ -77,6 +81,11 @@ class GroundEstimation(PreProcessor):
             sorted_z = np.sort(z_coords)
             self.ground_height = float(np.mean(sorted_z[:threshold_idx]))
             data.metadata["ground_height"] = self.ground_height
+            self._debug(
+                f"GroundEstimation: ground_height={self.ground_height:.4f}m, "
+                f"percentile={self.percentile}, "
+                f"z_range=[{float(z_coords.min()):.4f}, {float(z_coords.max()):.4f}]"
+            )
 
         return data
 

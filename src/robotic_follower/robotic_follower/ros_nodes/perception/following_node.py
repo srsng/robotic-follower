@@ -182,7 +182,7 @@ class FollowingNode(NodeWrapper):
             self._info(f"选中目标: track_id={track_id}")
         else:
             self.selected_track_id = None
-            self._info(f"取消跟随")
+            self._info("取消跟随")
 
     def _get_end_effector_pose(self) -> np.ndarray | None:
         """获取末端执行器在 base_link 下的位置。"""
