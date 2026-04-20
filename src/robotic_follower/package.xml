@@ -17,6 +17,8 @@
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
   <depend>cv_bridge</depend>
+  <depend>message_filters</depend>
+  <depend>robotic_follower_msgs</depend>
 
   <!-- 服务接口 -->
   <depend>std_srvs</depend>
