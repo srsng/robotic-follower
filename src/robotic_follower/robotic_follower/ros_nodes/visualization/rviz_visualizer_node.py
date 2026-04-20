@@ -51,6 +51,7 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Point
+from robotic_follower_msgs.msg import TrackedObject3DArray
 from sensor_msgs.msg import Image, PointCloud2
 from vision_msgs.msg import Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
@@ -83,6 +84,16 @@ class RVizVisualizerNode(NodeWrapper):
         )
         self.det_pub = self.create_publisher(
             MarkerArray, "/perception/detection_markers", 10
+        )
+
+        self.tracked_custom_sub = self.create_subscription(
+            TrackedObject3DArray,
+            "/perception/tracked_objects_custom",
+            self.tracked_custom_callback,
+            10,
+        )
+        self.tracked_custom_pub = self.create_publisher(
+            MarkerArray, "/perception/tracked_object_markers", 10
         )
 
         # ========== 深度图伪彩色 ==========
@@ -281,6 +292,80 @@ class RVizVisualizerNode(NodeWrapper):
         else:
             marker.text = f"{class_id} {score:.2f}"
         return marker
+
+    def tracked_custom_callback(self, msg: TrackedObject3DArray):
+        """TrackedObject3DArray -> MarkerArray（含质量字段文本）。"""
+        marker_array = MarkerArray()
+
+        delete_all = Marker()
+        delete_all.action = Marker.DELETEALL
+        marker_array.markers.append(delete_all)
+
+        for i, obj in enumerate(msg.objects):
+            wire_marker = Marker()
+            wire_marker.header = msg.header
+            wire_marker.ns = "tracked_wire_boxes"
+            wire_marker.id = i
+            wire_marker.type = Marker.LINE_STRIP
+            wire_marker.action = Marker.ADD
+
+            center = obj.center
+            size = obj.size
+            sx, sy, sz = size.x / 2.0, size.y / 2.0, size.z / 2.0
+            corners = [
+                [-sx, -sy, -sz],
+                [sx, -sy, -sz],
+                [sx, sy, -sz],
+                [-sx, sy, -sz],
+                [-sx, -sy, sz],
+                [sx, -sy, sz],
+                [sx, sy, sz],
+                [-sx, sy, sz],
+            ]
+            edges = [0, 1, 2, 3, 0, 4, 5, 6, 7, 4, 5, 1, 2, 6, 7, 3, 0]
+            for idx in edges:
+                p = Point()
+                p.x = center.x + corners[idx][0]
+                p.y = center.y + corners[idx][1]
+                p.z = center.z + corners[idx][2]
+                wire_marker.points.append(p)
+
+            wire_marker.scale.x = 0.02
+            if obj.graspable:
+                wire_marker.color.r = 0.1
+                wire_marker.color.g = 0.9
+                wire_marker.color.b = 0.2
+            else:
+                wire_marker.color.r = 1.0
+                wire_marker.color.g = 0.3
+                wire_marker.color.b = 0.0
+            wire_marker.color.a = 1.0
+            marker_array.markers.append(wire_marker)
+
+            text_marker = Marker()
+            text_marker.header = msg.header
+            text_marker.ns = "tracked_labels"
+            text_marker.id = i
+            text_marker.type = Marker.TEXT_VIEW_FACING
+            text_marker.action = Marker.ADD
+            text_marker.pose.position.x = center.x
+            text_marker.pose.position.y = center.y
+            text_marker.pose.position.z = center.z + sz + 0.12
+            text_marker.pose.orientation.w = 1.0
+            text_marker.scale.z = 0.07
+            text_marker.color.r = 1.0
+            text_marker.color.g = 1.0
+            text_marker.color.b = 1.0
+            text_marker.color.a = 1.0
+            stale_tag = "STALE" if obj.is_stale else "fresh"
+            grasp_tag = "graspable" if obj.graspable else "blocked"
+            text_marker.text = (
+                f"#{obj.tracking_id} {obj.label} {obj.score:.2f}\\n"
+                f"occ={obj.occlusion_ratio:.2f} {stale_tag} {grasp_tag}"
+            )
+            marker_array.markers.append(text_marker)
+
+        self.tracked_custom_pub.publish(marker_array)
 
     def depth_callback(self, msg: Image):
         """深度图 16UC1 → 伪彩色。"""

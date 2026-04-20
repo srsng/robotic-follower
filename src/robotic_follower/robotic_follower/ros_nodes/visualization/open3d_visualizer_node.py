@@ -170,12 +170,14 @@ class Open3DVisualizerNode(NodeWrapper):
                 if det_msg.id:
                     track_id = det_msg.id
 
-                detections.append({
-                    "bbox": bbox,
-                    "label": label,
-                    "score": score,
-                    "track_id": track_id,
-                })
+                detections.append(
+                    {
+                        "bbox": bbox,
+                        "label": label,
+                        "score": score,
+                        "track_id": track_id,
+                    }
+                )
 
             with self.data_lock:
                 self.current_detections = detections
