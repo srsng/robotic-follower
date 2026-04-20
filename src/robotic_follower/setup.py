@@ -73,6 +73,8 @@ setup(
             "chessboard_tf=robotic_follower.ros_nodes.calibration.chessboard_tf_node:main",
             # === UI相关节点 ===
             "track_selector_node=robotic_follower.ros_nodes.perception.track_selector_node:main",
+            # === 模拟仿真相关节点 ===
+            "fake_joint_states_publisher=robotic_follower.ros_nodes.sim.fake_joint_states_publisher:main",
         ],
     },
 )
