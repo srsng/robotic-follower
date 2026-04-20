@@ -85,15 +85,9 @@ class MergeOverlapping(PostProcessor):
                     if "bbox" not in other_det:
                         continue
 
-                    # 计算是否重叠（简单版：中心点距离）
-                    dist = np.linalg.norm(base_det["bbox"][:3] - other_det["bbox"][:3])
-                    # 使用两个检测结果 size 的平均值作为参考
-                    avg_size = (
-                        np.linalg.norm(base_det["bbox"][3:6])
-                        + np.linalg.norm(other_det["bbox"][3:6])
-                    ) / 2
-
-                    if dist < avg_size * 0.5:  # 重叠阈值
+                    # 计算 3D bbox IoU 并依据阈值判断是否合并
+                    iou = self._compute_iou_3d(base_det["bbox"], other_det["bbox"])
+                    if iou > self.iou_threshold:
                         to_merge.append(j)
 
                 # 合并
@@ -102,7 +96,7 @@ class MergeOverlapping(PostProcessor):
                     other_det = group[j]
                     other_points = other_det.get("points", np.array([]))
                     if len(other_points) > 0:
-                        base_det["points"] = np.vstack([base_points, other_points])
+                        base_det["points"] = np.vstack([base_det["points"], other_points])
                         base_det["score"] = max(
                             base_det.get("score", 1.0), other_det.get("score", 1.0)
                         )
@@ -114,10 +108,29 @@ class MergeOverlapping(PostProcessor):
                     max_coords = points.max(axis=0)
                     center = (min_coords + max_coords) / 2
                     sizes = max_coords - min_coords
+                    sizes = np.maximum(sizes, 0.001)
                     base_det["bbox"] = np.concatenate([center, sizes, np.zeros(1)])
                     merged.append(base_det)
 
         return merged
+
+    def _compute_iou_3d(self, bbox1: np.ndarray, bbox2: np.ndarray) -> float:
+        """计算两个 3D bbox 的 IoU（简化版）"""
+        center1, size1 = bbox1[:3], bbox1[3:6]
+        center2, size2 = bbox2[:3], bbox2[3:6]
+
+        overlap_min = np.maximum(center1 - size1 / 2, center2 - size2 / 2)
+        overlap_max = np.minimum(center1 + size1 / 2, center2 + size2 / 2)
+        overlap_size = np.maximum(0, overlap_max - overlap_min)
+
+        overlap_volume = np.prod(overlap_size)
+        vol1 = np.prod(size1)
+        vol2 = np.prod(size2)
+        denom = vol1 + vol2 - overlap_volume
+        if denom <= 0:
+            return 0.0
+
+        return overlap_volume / denom
 
 
 @StageRegistry.register_postprocessor("nms")
@@ -143,10 +156,16 @@ class NMS(PostProcessor):
             idx, det = sorted_dets.pop(0)
             keep.append(det)
 
+            if "bbox" not in det:
+                continue
+
             # 移除重叠度高的
             to_remove = []
             for other_idx, other_det in sorted_dets:
                 if det.get("label") != other_det.get("label"):
+                    continue
+
+                if "bbox" not in other_det:
                     continue
 
                 # 计算 IoU（简化版：用 3D bbox 的重叠）
@@ -173,9 +192,11 @@ class NMS(PostProcessor):
         overlap_volume = np.prod(overlap_size)
         vol1 = np.prod(size1)
         vol2 = np.prod(size2)
+        denom = vol1 + vol2 - overlap_volume
+        if denom <= 0:
+            return 0.0
 
-        iou = overlap_volume / (vol1 + vol2 - overlap_volume)
-        return iou
+        return overlap_volume / denom
 
 
 # 导出所有后处理阶段
