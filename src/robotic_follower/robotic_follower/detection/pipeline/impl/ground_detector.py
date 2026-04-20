@@ -35,12 +35,28 @@ class GroundDetector(AlgorithmStage):
             return data
 
         z_coords = data.points[:, 2]
-        z_min_orig = z_coords.min()
-        z_max_orig = z_coords.max()
+        z_min_orig = float(z_coords.min())
+        z_max_orig = float(z_coords.max())
 
-        # 地面厚度：极高点与极低点高度差 * 百分比，最大 0.15m，最小 0.001m
+        # # 打印 Z 轴分布直方图（帮助调试地面高度）
+        # n_bins = 20
+        # bin_edges = np.linspace(z_min_orig, z_max_orig, n_bins + 1)
+        # hist, _ = np.histogram(z_coords, bins=bin_edges)
+        # bin_width = (z_max_orig - z_min_orig) / n_bins
+        # self._debug(
+        #     f"Z 分布 (范围 {z_min_orig:.4f} ~ {z_max_orig:.4f}, bin={bin_width:.4f}m):"
+        # )
+        # for i in range(n_bins):
+        #     if hist[i] > 0:
+        #         bar = "#" * min(int(hist[i] / max(hist.max() / 40, 1)), 40)
+        #         self._debug(
+        #             f"  [{bin_edges[i]:+.4f}, {bin_edges[i + 1]:+.4f}) "
+        #             f"{hist[i]:>5d} {bar}"
+        #         )
+
+        # 地面厚度：极高与极低高度差 * 百分比，最小 0.001m
         ground_thickness = max(
-            min((z_max_orig - z_min_orig) * self.threshold_percent, 0.15), 0.001
+            (z_max_orig - z_min_orig) * self.threshold_percent, 0.001
         )
 
         # 计算地面高度坐标（最低 percentile 点的均值 = 地面底部 z）
@@ -49,7 +65,6 @@ class GroundDetector(AlgorithmStage):
             threshold_idx = max(1, int(len(z_coords) * self.percentile))
             sorted_z = np.sort(z_coords)
             ground_height_bottom = float(np.mean(sorted_z[:threshold_idx]))
-        original_ground_height_bottom = ground_height_bottom  # 保存原始值用于后续比较
 
         # bbox 几何中心的 z = 地面底部 + h/2
         ground_height_center = ground_height_bottom + ground_thickness / 2
@@ -60,13 +75,15 @@ class GroundDetector(AlgorithmStage):
         )
 
         self._debug(
-            f"z_min={z_min_orig}, z_max={z_max_orig}, thickness={ground_thickness}"
+            f"z_min={z_min_orig:.4f}, z_max={z_max_orig:.4f}, "
+            f"thickness={ground_thickness:.4f}"
         )
         self._debug(
-            f"ground_height_bottom={ground_height_bottom}, "
-            f"ground_height_center={ground_height_center}"
+            f"ground_height_bottom={ground_height_bottom:.4f}, "
+            f"ground_top={ground_height_bottom + ground_thickness:.4f}, "
+            f"ground_height_center={ground_height_center:.4f}"
         )
-        self._debug(f"points={len(data.points)}, ground_mask={np.sum(ground_mask)}")
+        self._debug(f"total={len(data.points)}, ground_points={np.sum(ground_mask)}")
 
         # 获取地面点
         ground_indices = np.where(ground_mask)[0]
@@ -84,7 +101,7 @@ class GroundDetector(AlgorithmStage):
             bbox_bottom = ground_height_center - ground_thickness / 2
             all_points_below = z_coords[z_coords < bbox_bottom]
             if len(all_points_below) > 0:
-                actual_bottom = all_points_below.min()
+                actual_bottom = float(all_points_below.min())
                 # bbox 尺寸不变，只下移
                 center[2] = actual_bottom + ground_thickness / 2
                 ground_height_bottom = actual_bottom
@@ -95,7 +112,7 @@ class GroundDetector(AlgorithmStage):
                 ground_indices = np.where(ground_mask)[0]
                 ground_points = data.points[ground_mask]
                 self._debug(
-                    f"地面 bbox 下移: actual_bottom={actual_bottom:.4f}, "
+                    f"Ground bbox 下移: actual_bottom={actual_bottom:.4f}, "
                     f"ground_height_center={ground_height_center:.4f}"
                 )
 
