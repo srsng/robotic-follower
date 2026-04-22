@@ -131,6 +131,14 @@ class FollowingNode(NodeWrapper):
         self.moveit2.max_velocity = 0.3
         self.moveit2.max_acceleration = 0.3
 
+        # 添加地面障碍物: 中心(0,0,0.05), 5m x 5m, 厚度0.01m
+        self.moveit2.add_collision_box(
+            id="ground",
+            position=(0.0, 0.0, 0.05),
+            quat_xyzw=(0.0, 0.0, 0.0, 1.0),
+            size=(5.0, 5.0, 0.01),
+        )
+
         # 使用单线程 executor，MoveIt2 服务调用在 spin 中处理
         self._executor = rclpy.executors.SingleThreadedExecutor()
         self._executor.add_node(self)
