@@ -30,11 +30,13 @@ class KalmanTracker3D:
         max_age: int = 8,
         min_hits: int = 3,
         size_alpha: float = 0.25,
+        duplicate_track_dist_m: float = 0.04,
     ):
         self.dist_gate_m = dist_gate_m
         self.max_age = max_age
         self.min_hits = min_hits
         self.size_alpha = size_alpha
+        self.duplicate_track_dist_m = duplicate_track_dist_m
         self.tracks: dict[int, KalmanTrack3D] = {}
         self._next_id = 1
 
@@ -74,6 +76,8 @@ class KalmanTracker3D:
             tr.age += 1
 
         for det_idx in unmatched_det:
+            if self._is_duplicate_new_detection(detections[det_idx]):
+                continue
             self._create_track(detections[det_idx])
 
         self._cleanup()
@@ -81,6 +85,10 @@ class KalmanTracker3D:
 
     def _predict(self, dt: float):
         for tr in self.tracks.values():
+            # Avoid smooth drifting for unmatched tracks.
+            if tr.missing_count > 0:
+                tr.state[3:6] *= 0.5
+                continue
             tr.state[0:3] += tr.state[3:6] * dt
 
     def _build_cost_matrix(self, detections: list[dict]) -> np.ndarray:
@@ -134,6 +142,16 @@ class KalmanTracker3D:
         self.tracks[self._next_id] = track
         self._next_id += 1
 
+    def _is_duplicate_new_detection(self, det: dict) -> bool:
+        if not self.tracks:
+            return False
+        center = np.asarray(det["bbox"][0:3], dtype=np.float32)
+        for tr in self.tracks.values():
+            t_center = tr.state[0:3]
+            if float(np.linalg.norm(center - t_center)) <= self.duplicate_track_dist_m:
+                return True
+        return False
+
     def _cleanup(self):
         stale_ids = [
             tid for tid, tr in self.tracks.items() if tr.missing_count > self.max_age
@@ -142,11 +160,11 @@ class KalmanTracker3D:
             del self.tracks[tid]
 
     def _export_tracks(self) -> list[dict]:
-        result = []
+        candidates = []
         for tr in self.tracks.values():
             if tr.hits < self.min_hits:
                 continue
-            result.append(
+            candidates.append(
                 {
                     "track_id": tr.track_id,
                     "bbox": [
@@ -164,4 +182,30 @@ class KalmanTracker3D:
                     "age": tr.age,
                 }
             )
-        return result
+
+        # Remove near-duplicate tracks, keep the one with higher hits/score.
+        if len(candidates) <= 1:
+            return candidates
+
+        keep = [True] * len(candidates)
+        for i in range(len(candidates)):
+            if not keep[i]:
+                continue
+            ci = np.asarray(candidates[i]["bbox"][:3], dtype=np.float32)
+            for j in range(i + 1, len(candidates)):
+                if not keep[j]:
+                    continue
+                cj = np.asarray(candidates[j]["bbox"][:3], dtype=np.float32)
+                dist = float(np.linalg.norm(ci - cj))
+                if dist > self.duplicate_track_dist_m:
+                    continue
+
+                # Prefer longer-lived track, then higher score.
+                ai = (int(candidates[i]["hits"]), float(candidates[i]["score"]))
+                aj = (int(candidates[j]["hits"]), float(candidates[j]["score"]))
+                if aj > ai:
+                    keep[i] = False
+                    break
+                keep[j] = False
+
+        return [c for c, k in zip(candidates, keep, strict=False) if k]

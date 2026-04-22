@@ -65,6 +65,7 @@ setup(
             "pointcloud_processor=robotic_follower.ros_nodes.perception.pointcloud_processor:main",
             "detection_node=robotic_follower.ros_nodes.perception.detection_node:main",
             "tracking_node=robotic_follower.ros_nodes.perception.tracking_node:main",
+            "rgbd_detect_track_node=robotic_follower.ros_nodes.perception.rgbd_detect_track_node:main",
             "following_node=robotic_follower.ros_nodes.perception.following_node:main",
             # === 可视化节点 ===
             "rviz_visualizer=robotic_follower.ros_nodes.visualization.rviz_visualizer_node:main",

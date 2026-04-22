@@ -66,6 +66,9 @@ class RVizVisualizerNode(NodeWrapper):
         super().__init__("rviz_visualizer")
 
         self.bridge = CvBridge()
+        self.enable_raw_detection_markers = bool(
+            self.declare_and_get_parameter("enable_raw_detection_markers", False)
+        )
 
         # ========== 点云转发 ==========
         self.pc_sub = self.create_subscription(
@@ -79,12 +82,18 @@ class RVizVisualizerNode(NodeWrapper):
         )
 
         # ========== 检测框可视化 ==========
-        self.det_sub = self.create_subscription(
-            Detection3DArray, "/perception/detections", self.detection_callback, 10
-        )
         self.det_pub = self.create_publisher(
             MarkerArray, "/perception/detection_markers", 10
         )
+        if self.enable_raw_detection_markers:
+            self.det_sub = self.create_subscription(
+                Detection3DArray,
+                "/perception/detections",
+                self.detection_callback,
+                10,
+            )
+        else:
+            self.det_sub = None
 
         self.tracked_custom_sub = self.create_subscription(
             TrackedObject3DArray,
@@ -98,17 +107,38 @@ class RVizVisualizerNode(NodeWrapper):
 
         # ========== 深度图伪彩色 ==========
         self.depth_sub = self.create_subscription(
-            Image, "/camera/aligned_depth_to_color/image_raw", self.depth_callback, 10
+            Image,
+            "/camera/camera/aligned_depth_to_color/image_raw",
+            self.depth_callback,
+            10,
         )
         self.depth_pub = self.create_publisher(Image, "/perception/depth_colored", 10)
 
         # ========== 彩色图转发 ==========
         self.rgb_sub = self.create_subscription(
-            Image, "/camera/color/image_raw", self.rgb_callback, 10
+            Image,
+            "/camera/camera/color/image_raw",
+            self.rgb_callback,
+            10,
         )
         self.rgb_pub = self.create_publisher(Image, "/perception/rgb_display", 10)
 
-        self._info("RViz 可视化节点已启动")
+        self.seg_debug_sub = self.create_subscription(
+            Image,
+            "/perception/segmentation_debug",
+            self.segmentation_debug_callback,
+            10,
+        )
+        self.seg_debug_pub = self.create_publisher(
+            Image,
+            "/perception/segmentation_debug_display",
+            10,
+        )
+
+        if self.enable_raw_detection_markers:
+            self._info("RViz 可视化节点已启动（显示原始检测框 + 追踪框）")
+        else:
+            self._info("RViz 可视化节点已启动（仅显示追踪框）")
 
     def pointcloud_callback(self, msg: PointCloud2):
         """点云回调：将 r,g,b 转换为 rgb 打包格式供 RViz 显示。"""
@@ -193,6 +223,10 @@ class RVizVisualizerNode(NodeWrapper):
     def rgb_callback(self, msg: Image):
         """彩色图直接转发。"""
         self.rgb_pub.publish(msg)
+
+    def segmentation_debug_callback(self, msg: Image):
+        """分割调试图转发。"""
+        self.seg_debug_pub.publish(msg)
 
     def detection_callback(self, msg: Detection3DArray):
         """Detection3DArray → MarkerArray（线框边界框）。"""

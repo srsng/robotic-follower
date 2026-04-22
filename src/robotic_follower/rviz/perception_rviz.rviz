@@ -12,7 +12,9 @@ Panels:
         - /PointCloud21
         - /Image1
         - /Image2
+        - /Image3
         - /Markers1
+        - /TrackedMarkers1
       Splitter Ratio: 0.36195287108421326
     Tree Height: 308
   - Class: rviz_common/Selection
@@ -271,8 +273,22 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /camera/camera/depth/image_rect_raw
       Value: true
-    - Class: rviz_default_plugins/MarkerArray
+    - Class: rviz_default_plugins/Image
       Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: SegmentationDebug
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /perception/segmentation_debug_display
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: false
       Name: Markers
       Namespace: ""
       Topic:
@@ -281,6 +297,17 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /perception/detection_markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: TrackedMarkers
+      Namespace: ""
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /perception/tracked_object_markers
       Value: true
   Enabled: true
   Global Options:

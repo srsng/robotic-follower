@@ -56,22 +56,22 @@ def generate_launch_description():
     """生成全功能感知的 Launch 描述"""
     params = set_configurable_parameters(local_parameters)
 
-    # 1. 3D 多目标追踪节点
-    tracking_node = Node(
-        package="robotic_follower",
-        executable="tracking_node",
-        name="tracking_node",
-        output="screen",
-        parameters=[
-            {
-                "input_topic": "/perception/detections",
-                "output_topic": "/perception/tracked_objects",
-                "iou_threshold": params["tracking_iou_threshold"],
-                "max_age": params["tracking_max_age"],
-                "min_hits": params["tracking_min_hits"],
-            }
-        ],
-    )
+    # # 1. 3D 多目标追踪节点
+    # tracking_node = Node(
+    #     package="robotic_follower",
+    #     executable="tracking_node",
+    #     name="tracking_node",
+    #     output="screen",
+    #     parameters=[
+    #         {
+    #             "input_topic": "/perception/detections",
+    #             "output_topic": "/perception/tracked_objects",
+    #             "iou_threshold": params["tracking_iou_threshold"],
+    #             "max_age": params["tracking_max_age"],
+    #             "min_hits": params["tracking_min_hits"],
+    #         }
+    #     ],
+    # )
 
     # 2. 目标选择器 UI 节点
     track_selector_node = Node(
@@ -108,7 +108,7 @@ def generate_launch_description():
             # 声明参数
             *declare_configurable_parameters(local_parameters),
             # 启动节点
-            tracking_node,
+            # tracking_node,
             track_selector_node,
             following_node,
         ]
