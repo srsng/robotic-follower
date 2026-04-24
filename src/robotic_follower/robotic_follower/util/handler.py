@@ -37,6 +37,7 @@ class NodeHandler(ABC):
         msg: str,
         fmt: str | None = None,
         call: LogCallback | None = None,
+        channel: str | None = None,
     ):
         """安全的日志输出: 当有父节点时使用父节点的日志函数, 否则使用 print.
 
@@ -45,8 +46,9 @@ class NodeHandler(ABC):
             msg: 消息
             fmt: print 输出的格式化字符串
             call: 日志回调, 参数为 (level, msg)
+            channel: 日志频道, 非None时将日志追加写入 ./log/<channel>.log
         """
-        log(level, msg, node=self.parent_node, fmt=fmt, call=call)
+        log(level, msg, node=self.parent_node, fmt=fmt, call=call, channel=channel)
 
     def _debug(self, msg: str):
         self._log("debug", msg)

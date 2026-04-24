@@ -1,6 +1,9 @@
+import atexit
+import fcntl
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import NewType
 
 from .rich_text import debug, error, fatal, info, warn
@@ -30,6 +33,41 @@ LogCallback = Callable[[Level, Msg], None]
 DEFAUL_FMT = "{time} {level} {message}"
 DEFAUL_LEVEL = "info"
 DEFAUL_LOG_LEVEL = _LEVEL_TO_INT[DEFAUL_LEVEL]
+
+_channel_files: dict[str, object] = {}
+
+
+def _close_channel_files():
+    for _, fh in _channel_files.items():
+        try:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+        except Exception:
+            pass
+        try:
+            fh.close()
+        except Exception:
+            pass
+    _channel_files.clear()
+
+
+atexit.register(_close_channel_files)
+
+
+def _write_to_channel(channel: str, level: str, msg: str):
+    """将日志追加写入 ./log/<channel>.log, 多进程通过文件锁安全共享."""
+    fh = _channel_files.get(channel)
+    if fh is None:
+        log_dir = Path("./log")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{channel}.log"
+        fh = log_path.open("a", encoding="utf-8")
+        _channel_files[channel] = fh
+    fcntl.flock(fh, fcntl.LOCK_EX)
+    try:
+        fh.write(f"{time.time_ns()} {level} {msg}\n")
+        fh.flush()
+    finally:
+        fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def log_level_lower(
@@ -115,6 +153,7 @@ def log(
     node: "rclpy.node.Node" = None,  # type: ignore # noqa: F821
     fmt: str | None = None,
     call: LogCallback | None = None,
+    channel: str | None = None,
 ):
     """安全的日志输出: 当有父节点时, 使用父节点的日志函数, 否则使用 print.
 
@@ -124,6 +163,7 @@ def log(
         node: 父节点用于日志输出. Defaults to None.
         fmt: print 输出的格式化字符串, 支持 {time}, {level}, {message}
         call: 日志回调, 参数为 (level, msg). Defaults to None.
+        channel: 日志频道, 非None时将日志追加写入 ./log/<channel>.log.
     """
     level_ok = True
     if level.lower() not in VALID_LOG_LEVEL:
@@ -137,6 +177,12 @@ def log(
         _log_by_ros_logger(level, msg, ros_logger, fmt, logger_level)
     else:
         _log_by_print(level, msg, None, fmt, logger_level)
+
+    if channel is not None:
+        try:
+            _write_to_channel(channel, level, msg)
+        except Exception:
+            pass
 
     if call is not None:
         call(Level(level), Msg(msg))
