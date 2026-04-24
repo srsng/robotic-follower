@@ -43,6 +43,7 @@ TF 依赖：
 
 import json
 import os
+import time
 
 import numpy as np
 import rclpy
@@ -277,6 +278,7 @@ class DetectionNode(NodeWrapper):
             self._publish_class_names_info()
             self._published_class_names = True
 
+        t0 = time.monotonic()
         try:
             # 坐标变换：使用 tf2_ros 规范方式变换点云
             transformed_cloud = self._transform_pointcloud(msg)
@@ -311,7 +313,14 @@ class DetectionNode(NodeWrapper):
                 self._warn("点云点数过少，跳过检测")
                 return
 
+            t_preprocess = time.monotonic() - t0
             detections = self.detector.detect(points_xyz)
+            t_infer = time.monotonic() - t0 - t_preprocess
+            self._log(
+                "debug",
+                f"t_preprocess={t_preprocess:.6f} t_infer={t_infer:.6f} n_pts={len(points_xyz)} n_det={len(detections)}",
+                channel="detection",
+            )
             self._debug(f"检测到 {len(detections)} 个目标")
             if detections:
                 detection_msg = self._create_detection_msg(

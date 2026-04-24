@@ -34,6 +34,8 @@
     ros2 run robotic_follower tracking_node --ros-args -p iou_threshold:=0.5
 """
 
+import time
+
 import rclpy
 from geometry_msgs.msg import Point, Quaternion, Vector3
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
@@ -83,6 +85,7 @@ class TrackingNode(NodeWrapper):
     def detection_callback(self, msg: Detection3DArray):
         """检测回调。"""
         self._debug(f"收到 {len(msg.detections)} 个检测")
+        t0 = time.monotonic()
 
         # 提取检测信息
         detections = []
@@ -120,6 +123,13 @@ class TrackingNode(NodeWrapper):
 
         # 更新追踪器
         tracked_objects = self.tracker.update(detections, msg.header)
+        t_track = time.monotonic() - t0
+
+        self._log(
+            "debug",
+            f"t_total={t_track:.6f} n_in={len(msg.detections)} n_tracked={len(tracked_objects)}",
+            channel="tracking",
+        )
 
         # 始终发布（即使为空），保证下游节点能感知到追踪器存活
         tracked_msg = self._create_tracked_msg(tracked_objects, msg.header)
