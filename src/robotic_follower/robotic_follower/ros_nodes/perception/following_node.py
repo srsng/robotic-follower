@@ -12,8 +12,8 @@
 
 架构说明：
     - 后台线程 rclpy.spin 处理 ROS 回调
-    - MoveGroup Action 使用 add_done_callback + threading.Event
-      避免与后台 spin 线程冲突
+    - 单规划模型: 同一时间最多一个活跃 goal，等执行完毕后才发下一个
+    - 目标位移超过1cm时才发新 goal，无活跃 goal 时立即发送
 
 订阅话题：
     - /perception/tracked_objects (vision_msgs/Detection3DArray)
@@ -66,7 +66,7 @@ class FollowingNode(NodeWrapper):
         selected_topic = self.declare_and_get_parameter(
             "selected_topic", "/perception/selected_target"
         )
-        self.update_rate = self.declare_and_get_parameter("update_rate", 5.0)
+        self.update_rate = self.declare_and_get_parameter("update_rate", 2.0)
 
         # TF 初始化
         self.tf_buffer = Buffer()
@@ -94,6 +94,13 @@ class FollowingNode(NodeWrapper):
         # 超时回 View 位姿
         self._last_target_time: float | None = None
         self._returning_to_view: bool = False
+
+        # 运动控制状态 (单规划模型)
+        self._motion_lock = threading.Lock()
+        self._active_goal_handle = None
+        self._goal_generation = 0
+        self._last_commanded_xyz: tuple[float, float, float] | None = None
+        self._DISPLACEMENT_THRESHOLD = 0.01  # 1cm
 
         # 添加地面障碍物
         self._add_ground_obstacle()
@@ -251,83 +258,83 @@ class FollowingNode(NodeWrapper):
         motion_plan_request.goal_constraints = [goal_constraints]
 
         motion_plan_request.planner_id = "RRTConnectkConfigDefault"
-        motion_plan_request.num_planning_attempts = 10
-        motion_plan_request.allowed_planning_time = 10.0
-        motion_plan_request.max_velocity_scaling_factor = 0.3
-        motion_plan_request.max_acceleration_scaling_factor = 0.3
+        motion_plan_request.num_planning_attempts = 3
+        motion_plan_request.allowed_planning_time = 2.0
+        motion_plan_request.max_velocity_scaling_factor = 0.5
+        motion_plan_request.max_acceleration_scaling_factor = 0.5
 
         goal.request = motion_plan_request
         goal.planning_options.plan_only = False
         goal.planning_options.look_around = False
-        goal.planning_options.replan = True
-        goal.planning_options.replan_attempts = 10
+        goal.planning_options.replan = False
 
         return goal
 
-    def move_to_joints_rad(self, joints_rad: list[float]) -> bool:
-        """规划并执行到指定关节角度（弧度）。
+    def _send_move_goal(self, joints_rad: list[float]):
+        """非阻塞发送 MoveGroup goal，使用 generation 过滤过期回调。
 
-        使用 add_done_callback + threading.Event 避免与后台 spin 线程冲突。
+        on_result 只处理当前 generation 的结果，旧 generation 的 result 静默丢弃。
+        goal 完成后清除 _active_goal_handle，follow_step 即可发送下一个 goal。
         """
         goal = self.create_move_group_goal(joints_rad)
 
-        done_event = threading.Event()
-        result_holder = [None, False]
+        with self._motion_lock:
+            self._goal_generation += 1
+            gen = self._goal_generation
 
         def on_goal_response(future):
             try:
                 goal_handle = future.result()
                 if not goal_handle.accepted:
                     self._warn("MoveGroup 目标被拒绝")
-                    result_holder[0] = "rejected"
-                    done_event.set()
+                    with self._motion_lock:
+                        if self._goal_generation == gen:
+                            self._active_goal_handle = None
                     return
-
                 self._info("目标已接受，开始规划和执行...")
-                get_result_future = goal_handle.get_result_async()
-                get_result_future.add_done_callback(on_result)
+                with self._motion_lock:
+                    if self._goal_generation == gen:
+                        self._active_goal_handle = goal_handle
+                goal_handle.get_result_async().add_done_callback(on_result)
             except Exception as e:
                 self._error(f"目标响应异常: {e}")
-                result_holder[0] = "error"
-                done_event.set()
+                with self._motion_lock:
+                    if self._goal_generation == gen:
+                        self._active_goal_handle = None
 
         def on_result(future):
+            with self._motion_lock:
+                is_current = self._goal_generation == gen
+                if is_current:
+                    self._active_goal_handle = None
+            if not is_current:
+                return
             try:
                 res = future.result()
                 error_code = res.result.error_code.val
-                result_holder[0] = error_code
-                result_holder[1] = error_code == 1
+                if error_code != 1:
+                    self._warn(f"运动执行失败，错误码: {error_code}")
+                else:
+                    self._info("规划和执行成功完成")
             except Exception as e:
                 self._error(f"结果回调异常: {e}")
-                result_holder[0] = "error"
-            done_event.set()
 
         self._info(f"发送目标 joint1={math.degrees(joints_rad[0]):.1f}°")
         self.move_group_client.send_goal_async(goal).add_done_callback(on_goal_response)
 
-        if not done_event.wait(timeout=60.0):
-            self._warn("MoveGroup 执行超时")
-            return False
-
-        if result_holder[0] == "rejected":
-            return False
-        if result_holder[0] == "error":
-            return False
-        if result_holder[0] is not None and isinstance(result_holder[0], int):
-            if result_holder[0] != 1:
-                self._warn(f"运动执行失败，错误码: {result_holder[0]}")
-                return False
-
-        self._info("规划和执行成功完成")
-        return result_holder[1]
-
     def follow_step(self):
-        """执行一次跟随: 计算 joint1 角度 + MoveGroup 规划执行。"""
+        """执行一次跟随: 单规划模型，有活跃 goal 时跳过，否则按需发送。"""
         now = time.monotonic()
+
+        with self._motion_lock:
+            has_active = self._active_goal_handle is not None
+        if has_active:
+            return
 
         if self.selected_track_id is None:
             self._last_target_time = None
             self._returning_to_view = False
+            self._last_commanded_xyz = None
             return
 
         target = None
@@ -350,10 +357,23 @@ class FollowingNode(NodeWrapper):
             if not self._returning_to_view:
                 self._info("目标丢失超过阈值，回到 View 位姿")
                 self._returning_to_view = True
-                self.move_to_joints_rad(VIEW_POSE_RAD)
+                self._last_commanded_xyz = None
+                self._send_move_goal(VIEW_POSE_RAD)
             return
 
-        target_x, target_y, target_z = target["bbox"][0], target["bbox"][1], target["bbox"][2]
+        target_x, target_y, target_z = (
+            target["bbox"][0],
+            target["bbox"][1],
+            target["bbox"][2],
+        )
+
+        if self._last_commanded_xyz is not None:
+            dx = target_x - self._last_commanded_xyz[0]
+            dy = target_y - self._last_commanded_xyz[1]
+            dz = target_z - self._last_commanded_xyz[2]
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if dist < self._DISPLACEMENT_THRESHOLD:
+                return
 
         self._info(f"目标位置: ({target_x:.3f}, {target_y:.3f}, {target_z:.3f})")
         self._publish_follow_target_pose(target_x, target_y, target_z)
@@ -364,7 +384,9 @@ class FollowingNode(NodeWrapper):
 
         yaw_deg = math.degrees(joints[0])
         self._info(f"跟随: joint1={yaw_deg:.1f}°")
-        self.move_to_joints_rad(joints)
+
+        self._send_move_goal(joints)
+        self._last_commanded_xyz = (target_x, target_y, target_z)
 
 
 def main(args=None):
