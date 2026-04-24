@@ -318,7 +318,8 @@ class RVizVisualizerNode(NodeWrapper):
         class_id = "Unknown"
         score = 0.0
         if det.results:
-            class_id = det.results[0].hypothesis.class_id
+            raw_class_id = det.results[0].hypothesis.class_id
+            class_id = raw_class_id.strip() if raw_class_id else "Unknown"
             score = det.results[0].hypothesis.score
 
         if track_id:
@@ -391,11 +392,12 @@ class RVizVisualizerNode(NodeWrapper):
             text_marker.color.g = 1.0
             text_marker.color.b = 1.0
             text_marker.color.a = 1.0
-            stale_tag = "STALE" if obj.is_stale else "fresh"
-            grasp_tag = "graspable" if obj.graspable else "blocked"
+            # stale_tag = "STALE" if obj.is_stale else "fresh"
+            # grasp_tag = "graspable" if obj.graspable else "blocked"
+            label = obj.label.strip() if obj.label else "Unknown"
             text_marker.text = (
-                f"#{obj.tracking_id} {obj.label} {obj.score:.2f}\\n"
-                f"occ={obj.occlusion_ratio:.2f} {stale_tag} {grasp_tag}"
+                f"#{obj.tracking_id}_{label.replace(' ', '_')}_{obj.score:.2f}"
+                # f"_occ={obj.occlusion_ratio:.2f}"
             )
             marker_array.markers.append(text_marker)
 
