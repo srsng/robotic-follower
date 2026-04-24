@@ -7,7 +7,12 @@
     - 订阅 /perception/selected_target 获取选中的目标 track_id
     - 通过 TF 获取机械臂末端执行器位置
     - 计算跟随目标点（目标中心与末端连线上，距目标 15cm）
-    - 调用 MoveIt IK 求解并驱动机械臂运动
+    - 调用 MoveIt IK 求解并通过 MoveGroup Action 驱动机械臂运动
+
+架构说明：
+    - 后台线程 rclpy.spin 处理 ROS 回调（话题、TF 等）
+    - 主线程执行跟随循环：IK + MoveGroup 规划执行
+    - 与 moveit_rviz_planner.py 一致，避免 spin 嵌套死锁
 
 订阅话题：
     - /perception/tracked_objects (vision_msgs/Detection3DArray)
@@ -38,11 +43,17 @@
 
 import contextlib
 import math
+import threading
+import time
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import Int32
+from moveit_msgs.action import MoveGroup
+from moveit_msgs.msg import Constraints, JointConstraint, MotionPlanRequest
+from rclpy.action import ActionClient
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Header, Int32
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3DArray
 
@@ -94,26 +105,32 @@ class FollowingNode(NodeWrapper):
         # 当前选中的目标
         self.selected_track_id: int | None = None
         self.tracked_objects: list[dict] = []
+        self.current_joint_positions: list[float] | None = None
+        self.joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
 
-        # 初始化 MoveIt2
+        # 初始化 MoveIt2（仅用于 IK）
         self._init_moveit2()
 
-        # 启动定时器进行跟随
-        self._follow_timer = self.create_timer(
-            1.0 / self.update_rate, self._follow_timer_callback
+        # MoveGroup Action（规划+执行）
+        self.move_group_client = ActionClient(self, MoveGroup, "/move_action")
+        self.joint_state_subscriber = self.create_subscription(
+            JointState, "joint_states", self._joint_state_callback, 10
         )
+
+        if not self.move_group_client.wait_for_server(timeout_sec=10.0):
+            self._fatal("MoveGroup Action 服务不可用: /move_action")
+            raise RuntimeError("MoveGroup Action 服务不可用")
 
         self._info("目标跟随节点已启动")
 
     def _init_moveit2(self):
-        """初始化 MoveIt2 接口。"""
+        """初始化 MoveIt2 接口（仅用于 IK 求解）。"""
         try:
             from pymoveit2 import MoveIt2
         except ImportError as e:
             self._fatal(f"pymoveit2 未安装: {e}")
             raise
 
-        # 直接定义机械臂配置（与 URDF 一致）
         joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
         base_link_name = "base_link"
         end_effector_name = "link6_1_1"
@@ -127,11 +144,9 @@ class FollowingNode(NodeWrapper):
             group_name=group_name,
         )
 
-        # 设置速度和加速度
         self.moveit2.max_velocity = 0.3
         self.moveit2.max_acceleration = 0.3
 
-        # 添加地面障碍物: 中心(0,0,0.05), 5m x 5m, 厚度0.01m
         self.moveit2.add_collision_box(
             id="ground",
             position=(0.0, 0.0, 0.05),
@@ -139,11 +154,12 @@ class FollowingNode(NodeWrapper):
             size=(5.0, 5.0, 0.01),
         )
 
-        # 使用单线程 executor，MoveIt2 服务调用在 spin 中处理
-        self._executor = rclpy.executors.SingleThreadedExecutor()
-        self._executor.add_node(self)
-
         self._info("MoveIt2 初始化完成")
+
+    def _joint_state_callback(self, msg: JointState):
+        """更新当前关节状态。"""
+        if len(msg.position) >= 6:
+            self.current_joint_positions = list(msg.position[:6])
 
     def tracked_callback(self, msg: Detection3DArray):
         """跟踪目标回调。"""
@@ -157,19 +173,16 @@ class FollowingNode(NodeWrapper):
             )
             dx, dy, dz = bbox.size.x, bbox.size.y, bbox.size.z
 
-            # 从四元数提取 yaw
             q = bbox.center.orientation
             siny_spawn = 2.0 * (q.w * q.z + q.x * q.y)
             cosy_spawn = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             yaw = math.atan2(siny_spawn, cosy_spawn)
 
-            # 提取 track_id（从 Detection3D.id 字段）
             track_id = None
             if det.id:
                 with contextlib.suppress(ValueError):
                     track_id = int(det.id)
 
-            # 提取类别标签
             label = "unknown"
             if det.results:
                 label = det.results[0].hypothesis.class_id
@@ -233,37 +246,6 @@ class FollowingNode(NodeWrapper):
         follow_point = target_center + direction * self.follow_distance
         return follow_point
 
-    def _follow_timer_callback(self):
-        """定时执行跟随。"""
-        if self.selected_track_id is None:
-            return
-
-        # 查找选中的目标
-        target = None
-        for obj in self.tracked_objects:
-            if obj["track_id"] == self.selected_track_id:
-                target = obj
-                break
-
-        if target is None:
-            self._warn(f"未找到 track_id={self.selected_track_id} 的目标")
-            return
-
-        # 获取末端位置
-        end_effector_pos = self._get_end_effector_pose()
-        if end_effector_pos is None:
-            return
-
-        # 计算跟随点
-        target_center = np.array(target["bbox"][0:3])
-        follow_point = self._compute_follow_point(target_center, end_effector_pos)
-
-        # 发布目标点（调试用）
-        self._publish_follow_target_pose(follow_point)
-
-        # 执行 IK 并移动
-        self._move_to_follow_point(follow_point)
-
     def _publish_follow_target_pose(self, follow_point: np.ndarray):
         """发布跟随目标点（调试用）。"""
         msg = PoseStamped()
@@ -272,46 +254,157 @@ class FollowingNode(NodeWrapper):
         msg.pose.position.x = float(follow_point[0])
         msg.pose.position.y = float(follow_point[1])
         msg.pose.position.z = float(follow_point[2])
-        # 默认朝下（沿 -Z 方向）
         msg.pose.orientation.w = 1.0
         self.target_pose_pub.publish(msg)
 
-    def _move_to_follow_point(self, follow_point: np.ndarray):
-        """移动到跟随目标点。"""
+    def create_move_group_goal(self, target_positions: list[float]) -> MoveGroup.Goal:
+        """创建 MoveGroup goal。"""
+        goal = MoveGroup.Goal()
+
+        motion_plan_request = MotionPlanRequest()
+        motion_plan_request.group_name = "dummy_arm"
+
+        motion_plan_request.start_state.joint_state.header = Header()
+        motion_plan_request.start_state.joint_state.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
+        motion_plan_request.start_state.joint_state.name = self.joint_names
+        motion_plan_request.start_state.joint_state.position = (
+            self.current_joint_positions or [0.0] * 6
+        )
+
+        joint_constraints = []
+        for name, position in zip(self.joint_names, target_positions):
+            joint_constraint = JointConstraint()
+            joint_constraint.joint_name = name
+            joint_constraint.position = position
+            joint_constraint.tolerance_above = 0.01
+            joint_constraint.tolerance_below = 0.01
+            joint_constraint.weight = 1.0
+            joint_constraints.append(joint_constraint)
+
+        goal_constraints = Constraints()
+        goal_constraints.joint_constraints = joint_constraints
+        motion_plan_request.goal_constraints = [goal_constraints]
+
+        motion_plan_request.planner_id = "RRTConnectkConfigDefault"
+        motion_plan_request.num_planning_attempts = 10
+        motion_plan_request.allowed_planning_time = 10.0
+        motion_plan_request.max_velocity_scaling_factor = 0.3
+        motion_plan_request.max_acceleration_scaling_factor = 0.3
+
+        goal.request = motion_plan_request
+        goal.planning_options.plan_only = False
+        goal.planning_options.look_around = False
+        goal.planning_options.replan = True
+        goal.planning_options.replan_attempts = 10
+
+        return goal
+
+    def move_to_joints_rad(self, joints_rad: list[float]) -> bool:
+        """规划并执行到指定关节角度（弧度）。
+
+        与 moveit_rviz_planner.py / arm_controller.py 一致:
+        使用 MoveGroup Action + spin_until_future_complete。
+        """
         try:
-            # 计算 IK（使用默认方向，朝下）
-            # quaternion: w=1, x=y=z=0 表示无旋转
-            quat_xyzw = (0.0, 0.0, 0.0, 1.0)
+            goal = self.create_move_group_goal(joints_rad)
 
-            joint_states = self.moveit2.compute_ik(
-                position=(
-                    float(follow_point[0]),
-                    float(follow_point[1]),
-                    float(follow_point[2]),
-                ),
-                quat_xyzw=quat_xyzw,
-            )
+            self._info("发送目标到 MoveGroup...")
+            send_goal_future = self.move_group_client.send_goal_async(goal)
+            rclpy.spin_until_future_complete(self, send_goal_future, timeout_sec=5.0)
 
-            if joint_states is None:
-                self._warn("IK 求解失败")
-                return
+            if send_goal_future.result() is None:
+                self._warn("目标发送超时")
+                return False
 
-            # 移动到目标关节角度
-            joint_positions = list(joint_states.position)
-            self.moveit2.move_to_configuration(joint_positions)
-            self.moveit2.wait_until_executed()
+            goal_handle = send_goal_future.result()
+            if not goal_handle.accepted:
+                self._warn("MoveGroup 目标被拒绝")
+                return False
 
-            self._debug(f"已移动到跟随点: {follow_point}")
+            self._info("目标已接受，开始规划和执行...")
+
+            get_result_future = goal_handle.get_result_async()
+            rclpy.spin_until_future_complete(self, get_result_future, timeout_sec=60.0)
+
+            if get_result_future.result() is None:
+                self._warn("运动执行超时")
+                return False
+
+            result = get_result_future.result()
+            error_code = result.result.error_code.val
+            if error_code != 1:
+                self._warn(f"运动执行失败，错误码: {error_code}")
+                return False
+
+            self._info("规划和执行成功完成")
+            return True
 
         except Exception as e:
-            self._error(f"移动失败: {e}")
+            self._error(f"规划执行异常: {e}")
+            return False
+
+    def follow_step(self):
+        """执行一次跟随: IK 求解 + MoveGroup 规划执行。"""
+        if self.selected_track_id is None:
+            return
+
+        target = None
+        for obj in self.tracked_objects:
+            if obj["track_id"] == self.selected_track_id:
+                target = obj
+                break
+
+        if target is None:
+            return
+
+        end_effector_pos = self._get_end_effector_pose()
+        if end_effector_pos is None:
+            return
+
+        target_center = np.array(target["bbox"][0:3])
+        follow_point = self._compute_follow_point(target_center, end_effector_pos)
+
+        self._publish_follow_target_pose(follow_point)
+
+        # IK 求解
+        quat_xyzw = (0.0, 0.0, 0.0, 1.0)
+        joint_states = self.moveit2.compute_ik(
+            position=(
+                float(follow_point[0]),
+                float(follow_point[1]),
+                float(follow_point[2]),
+            ),
+            quat_xyzw=quat_xyzw,
+        )
+
+        if joint_states is None:
+            self._warn("IK 求解失败")
+            return
+
+        # 规划+执行
+        joint_positions = list(joint_states.position)
+        self.move_to_joints_rad(joint_positions)
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = FollowingNode()
+
+    # 后台线程 spin 处理回调（与 moveit_rviz_planner.py 一致）
+    spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+    spin_thread.start()
+
     try:
-        node._executor.spin()
+        # 主循环：跟随
+        rate = 1.0 / node.update_rate
+        while rclpy.ok():
+            try:
+                node.follow_step()
+            except Exception as e:
+                node._error(f"跟随异常: {e}")
+            time.sleep(rate)
     except KeyboardInterrupt:
         node._info("收到中断信号")
     finally:
