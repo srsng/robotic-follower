@@ -59,6 +59,9 @@ from vision_msgs.msg import Detection3DArray
 
 from robotic_follower.util.wrapper import NodeWrapper
 
+VIEW_POSE_RAD = [math.radians(d) for d in [0, -36.04, -21.09, 0, -89.63, 0]]
+VIEW_POSE_TIMEOUT_SEC = 5.0
+
 
 class FollowingNode(NodeWrapper):
     """目标跟随节点。"""
@@ -107,6 +110,10 @@ class FollowingNode(NodeWrapper):
         self.tracked_objects: list[dict] = []
         self.current_joint_positions: list[float] | None = None
         self.joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+
+        # 超时回 View 位姿
+        self._last_target_time: float | None = None
+        self._returning_to_view: bool = False
 
         # 初始化 MoveIt2（仅用于 IK）
         self._init_moveit2()
@@ -346,19 +353,51 @@ class FollowingNode(NodeWrapper):
             return False
 
     def follow_step(self):
-        """执行一次跟随: IK 求解 + MoveGroup 规划执行。"""
+        """执行一次跟随: IK 求解 + MoveGroup 规划执行。
+
+        状态机：
+            IDLE        - 没有选中目标，什么都不做
+            TRACKING    - 目标存在，正常跟随
+            TARGET_LOST - 目标丢失，等待超时后回 View 位姿
+        """
+        now = time.monotonic()
+
+        # ---- 尚未选中目标 → 完全静止 ----
         if self.selected_track_id is None:
+            self._last_target_time = None
+            self._returning_to_view = False
             return
 
+        # ---- 查找当前侦跟踪的目标 ----
         target = None
         for obj in self.tracked_objects:
             if obj["track_id"] == self.selected_track_id:
                 target = obj
                 break
 
-        if target is None:
+        if target is not None:
+            # ---- 目标存在 → 更新时间戳，正常跟随 ----
+            self._last_target_time = now
+            self._returning_to_view = False
+        else:
+            # ---- 目标丢失 ----
+            if self._last_target_time is None:
+                # 从未见过该目标，等一等
+                return
+
+            elapsed = now - self._last_target_time
+            if elapsed <= VIEW_POSE_TIMEOUT_SEC:
+                # 仍在超时窗口内，暂不回 View
+                return
+
+            # ---- 超时 → 回 View 位姿（仅执行一次） ----
+            if not self._returning_to_view:
+                self._info("目标丢失超过阈值，回到 View 位姿")
+                self._returning_to_view = True
+                self.move_to_joints_rad(VIEW_POSE_RAD)
             return
 
+        # ---- 正常跟随 ----
         end_effector_pos = self._get_end_effector_pose()
         if end_effector_pos is None:
             return
@@ -368,7 +407,6 @@ class FollowingNode(NodeWrapper):
 
         self._publish_follow_target_pose(follow_point)
 
-        # IK 求解
         quat_xyzw = (0.0, 0.0, 0.0, 1.0)
         joint_states = self.moveit2.compute_ik(
             position=(
@@ -383,7 +421,6 @@ class FollowingNode(NodeWrapper):
             self._warn("IK 求解失败")
             return
 
-        # 规划+执行
         joint_positions = list(joint_states.position)
         self.move_to_joints_rad(joint_positions)
 
