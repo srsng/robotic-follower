@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,6 +41,32 @@ class RgbdDetectTrackNode(NodeWrapper):
 
     def __init__(self):
         super().__init__("rgbd_detect_track_node")
+
+        self._param_defaults: dict[str, object] = {
+            "target_frame": "base_link",
+            "depth_valid_ratio_min": 0.6,
+            "mask_area_min_px": 400,
+            "mask_aspect_ratio_max": 6.0,
+            "z_trim_quantile": 0.05,
+            "table_margin_m": 0.01,
+            "table_z": 0.0,
+            "table_reestimate_interval_s": 2.0,
+            "table_reestimate_min_inlier_ratio": 0.35,
+            "tf_stale_threshold_ms": 80.0,
+            "sync_skew_threshold_ms": 30.0,
+            "tf_fallback_warn_every": 45,
+            "table_warn_every": 45,
+            "sync_warn_every": 45,
+            "association_dist_gate_m": 0.25,
+            "detection_merge_dist_m": 0.06,
+            "detection_merge_iou_min": 0.18,
+            "duplicate_track_dist_m": 0.08,
+            "max_age": 20,
+            "min_hits": 2,
+            "occlusion_ratio_max_for_grasp": 0.45,
+            "max_non_person_distance_m": 1.2,
+            "fallback_to_source_frame_when_tf_disconnected": True,
+        }
 
         self.bridge = CvBridge()
         self.tf_buffer = Buffer()
@@ -116,6 +143,9 @@ class RgbdDetectTrackNode(NodeWrapper):
             "config_file", "model/config/yolov8_seg_rgbd_track.yaml"
         )
         config = self._load_config(config_file)
+        cfg_params = config.get("params", {}) if isinstance(config, dict) else {}
+        self._apply_config_params(cfg_params)
+
         segmenter_cfg = config.get("segmenter", {"type": "yolov8_seg"})
         self.segmenter = create_segmenter_from_config(segmenter_cfg, parent_node=self)
 
@@ -168,6 +198,33 @@ class RgbdDetectTrackNode(NodeWrapper):
 
         self._info("融合检测追踪节点已启动")
 
+    def _apply_config_params(self, cfg_params: dict):
+        """将配置文件中的 params 应用于运行参数。
+
+        优先级：显式 ROS 参数覆盖 > 配置文件 > 代码默认值。
+        """
+        if not cfg_params:
+            return
+
+        changed: list[str] = []
+        for key, cfg_value in cfg_params.items():
+            if not hasattr(self, key):
+                continue
+            if key not in self._param_defaults:
+                continue
+
+            current_value = getattr(self, key)
+            default_value = self._param_defaults[key]
+
+            if current_value != default_value:
+                continue
+
+            setattr(self, key, cfg_value)
+            changed.append(f"{key}={cfg_value}")
+
+        if changed:
+            self._info("应用配置文件参数: " + ", ".join(changed))
+
     def _load_config(self, config_file: str) -> dict:
         expanded = os.path.expanduser(config_file)
         tried_paths: list[str] = []
@@ -197,6 +254,7 @@ class RgbdDetectTrackNode(NodeWrapper):
             return yaml.safe_load(f) or {}
 
     def synced_callback(self, rgb_msg: Image, depth_msg: Image, info_msg: CameraInfo):
+        t0 = time.monotonic()
         try:
             self._update_sync_skew(rgb_msg, depth_msg)
 
@@ -216,9 +274,12 @@ class RgbdDetectTrackNode(NodeWrapper):
                 self._warn("RGB 和 Depth 分辨率不一致，跳过本帧")
                 return
 
+            t_seg_start = time.monotonic()
             seg = self.segmenter.segment(rgb)
+            t_seg = time.monotonic() - t_seg_start
             person_mask = seg["person_mask"]
 
+            t_preprocess_start = time.monotonic()
             detections: list[DetectionCandidate] = []
             debug_raw_masks: list[np.ndarray] = []
             debug_cleaned_masks: list[np.ndarray] = []
@@ -247,6 +308,7 @@ class RgbdDetectTrackNode(NodeWrapper):
                     detections.append(cand)
 
             detections = self._merge_detection_candidates(detections)
+            t_preprocess = time.monotonic() - t_preprocess_start
 
             if self.enable_segmentation_debug_vis:
                 self._publish_segmentation_debug(
@@ -257,6 +319,12 @@ class RgbdDetectTrackNode(NodeWrapper):
                     cleaned_masks=debug_cleaned_masks,
                     accepted_count=len(detections),
                 )
+
+            self._log(
+                "debug",
+                f"t_seg={t_seg:.6f} t_preprocess={t_preprocess:.6f} n_raw={len(seg['object_masks'])} n_accepted={len(detections)}",
+                channel="detection",
+            )
 
             self._publish_raw_detections(detections, rgb_msg.header)
 
@@ -272,6 +340,12 @@ class RgbdDetectTrackNode(NodeWrapper):
             ]
             tracked = self.tracker.update(det_dicts)
             self._update_track_quality(tracked, detections, is_stale)
+            t_track_total = time.monotonic() - t0
+            self._log(
+                "debug",
+                f"t_track_assoc_update={time.monotonic() - t0:.6f} t_total={t_track_total:.6f} n_tracked={len(tracked)}",
+                channel="tracking",
+            )
             self._publish_tracks(tracked, rgb_msg.header, is_stale=is_stale)
 
             self._maybe_reestimate_table(depth, info_msg, t_mat)
@@ -575,7 +649,9 @@ class RgbdDetectTrackNode(NodeWrapper):
                 keep.append(base)
                 continue
 
-            weights = np.asarray([max(1e-3, d.score) for d in cluster], dtype=np.float32)
+            weights = np.asarray(
+                [max(1e-3, d.score) for d in cluster], dtype=np.float32
+            )
             weights /= float(weights.sum())
             centers = np.asarray([d.bbox[:3] for d in cluster], dtype=np.float32)
             sizes = np.asarray([d.bbox[3:6] for d in cluster], dtype=np.float32)
@@ -709,8 +785,7 @@ class RgbdDetectTrackNode(NodeWrapper):
             )
         else:
             self._warn_throttled(
-                f"table_z 重估失败，沿用旧值 {self.table_z:.4f} (inlier_ratio={inlier_ratio:.2f})"
-                ,
+                f"table_z 重估失败，沿用旧值 {self.table_z:.4f} (inlier_ratio={inlier_ratio:.2f})",
                 key="table_fail",
                 period_frames=int(self.table_warn_every),
             )
