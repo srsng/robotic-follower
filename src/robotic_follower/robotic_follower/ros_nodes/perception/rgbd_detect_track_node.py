@@ -44,10 +44,11 @@ class RgbdDetectTrackNode(NodeWrapper):
 
         self._param_defaults: dict[str, object] = {
             "target_frame": "base_link",
-            "depth_valid_ratio_min": 0.6,
-            "mask_area_min_px": 400,
+            "depth_valid_ratio_min": 0.35,
+            "mask_area_min_px": 200,
+            "mask_area_max_ratio": 0.40,
             "mask_aspect_ratio_max": 6.0,
-            "z_trim_quantile": 0.05,
+            "z_trim_quantile": 0.08,
             "table_margin_m": 0.01,
             "table_z": 0.0,
             "table_reestimate_interval_s": 2.0,
@@ -60,12 +61,13 @@ class RgbdDetectTrackNode(NodeWrapper):
             "association_dist_gate_m": 0.25,
             "detection_merge_dist_m": 0.06,
             "detection_merge_iou_min": 0.18,
-            "duplicate_track_dist_m": 0.08,
+            "duplicate_track_dist_m": 0.06,
             "max_age": 20,
             "min_hits": 2,
             "occlusion_ratio_max_for_grasp": 0.45,
             "max_non_person_distance_m": 1.2,
             "fallback_to_source_frame_when_tf_disconnected": True,
+            "exclude_labels": ["dining table"],
         }
 
         self.bridge = CvBridge()
@@ -76,16 +78,17 @@ class RgbdDetectTrackNode(NodeWrapper):
         self.base_frame = self.target_frame
 
         self.depth_valid_ratio_min = self.declare_and_get_parameter(
-            "depth_valid_ratio_min", 0.6
+            "depth_valid_ratio_min", 0.35
         )
 
-        self.mask_area_min_px = self.declare_and_get_parameter("mask_area_min_px", 400)
+        self.mask_area_min_px = self.declare_and_get_parameter("mask_area_min_px", 200)
+        self.mask_area_max_ratio = self.declare_and_get_parameter("mask_area_max_ratio", 0.40)
 
         self.mask_aspect_ratio_max = self.declare_and_get_parameter(
             "mask_aspect_ratio_max", 6.0
         )
 
-        self.z_trim_quantile = self.declare_and_get_parameter("z_trim_quantile", 0.05)
+        self.z_trim_quantile = self.declare_and_get_parameter("z_trim_quantile", 0.08)
         self.table_margin_m = self.declare_and_get_parameter("table_margin_m", 0.01)
         self.table_z = self.declare_and_get_parameter("table_z", 0.0)
         self.table_reestimate_interval_s = self.declare_and_get_parameter(
@@ -106,7 +109,7 @@ class RgbdDetectTrackNode(NodeWrapper):
         self.table_warn_every = self.declare_and_get_parameter("table_warn_every", 45)
         self.sync_warn_every = self.declare_and_get_parameter("sync_warn_every", 45)
         self.association_dist_gate_m = self.declare_and_get_parameter(
-            "association_dist_gate_m", 0.08
+            "association_dist_gate_m", 0.25
         )
         self.detection_merge_dist_m = self.declare_and_get_parameter(
             "detection_merge_dist_m", 0.06
@@ -115,10 +118,10 @@ class RgbdDetectTrackNode(NodeWrapper):
             "detection_merge_iou_min", 0.18
         )
         self.duplicate_track_dist_m = self.declare_and_get_parameter(
-            "duplicate_track_dist_m", 0.04
+            "duplicate_track_dist_m", 0.06
         )
-        self.max_age = self.declare_and_get_parameter("max_age", 8)
-        self.min_hits = self.declare_and_get_parameter("min_hits", 3)
+        self.max_age = self.declare_and_get_parameter("max_age", 20)
+        self.min_hits = self.declare_and_get_parameter("min_hits", 2)
         self.occlusion_ratio_max_for_grasp = self.declare_and_get_parameter(
             "occlusion_ratio_max_for_grasp", 0.45
         )
@@ -130,11 +133,17 @@ class RgbdDetectTrackNode(NodeWrapper):
                 "fallback_to_source_frame_when_tf_disconnected", True
             )
         )
+        self.exclude_labels: list[str] = list(
+            self.declare_and_get_parameter(
+                "exclude_labels", ["dining table"], list[str]
+            )
+        )
 
         self.tf_lookup_fail_count = 0
         self.last_tf_age_ms = 0.0
         self.last_sync_skew_ms = 0.0
         self.last_stamp_ns: int | None = None
+        self._prev_stamp_ns: int | None = None
         self.last_table_reestimate_ns = 0
         self._warn_counters: dict[str, int] = {}
         self._current_output_frame = self.base_frame
@@ -256,13 +265,20 @@ class RgbdDetectTrackNode(NodeWrapper):
     def synced_callback(self, rgb_msg: Image, depth_msg: Image, info_msg: CameraInfo):
         t0 = time.monotonic()
         try:
+            current_stamp_ns = self._stamp_to_ns(rgb_msg.header.stamp)
+            if self._prev_stamp_ns is not None:
+                dt = max((current_stamp_ns - self._prev_stamp_ns) / 1e9, 0.001)
+            else:
+                dt = 0.033
+            self._prev_stamp_ns = current_stamp_ns
+
             self._update_sync_skew(rgb_msg, depth_msg)
 
             tf_data = self._lookup_transform(
                 depth_msg.header.frame_id, rgb_msg.header.stamp
             )
             if tf_data is None:
-                tracked = self.tracker.update([])
+                tracked = self.tracker.update([], dt=dt)
                 self._publish_tracks(tracked, rgb_msg.header, is_stale=True)
                 return
             t_mat, is_stale, output_frame = tf_data
@@ -286,6 +302,8 @@ class RgbdDetectTrackNode(NodeWrapper):
             for mask, score, label in zip(
                 seg["object_masks"], seg["scores"], seg["labels"], strict=False
             ):
+                if label in self.exclude_labels:
+                    continue
                 raw_mask = mask if mask.dtype == bool else mask.astype(bool)
                 debug_raw_masks.append(raw_mask)
                 cleaned_for_vis = self._compute_cleaned_mask(raw_mask, person_mask)
@@ -338,7 +356,7 @@ class RgbdDetectTrackNode(NodeWrapper):
                 }
                 for d in detections
             ]
-            tracked = self.tracker.update(det_dicts)
+            tracked = self.tracker.update(det_dicts, dt=dt)
             self._update_track_quality(tracked, detections, is_stale)
             t_track_total = time.monotonic() - t0
             self._log(
@@ -493,10 +511,10 @@ class RgbdDetectTrackNode(NodeWrapper):
         if len(points_base) < 10:
             return None
 
-        min_xyz = points_base.min(axis=0)
-        max_xyz = points_base.max(axis=0)
-        center = (min_xyz + max_xyz) / 2.0
-        size = np.maximum(max_xyz - min_xyz, 1e-3)
+        p_low = np.percentile(points_base, 5, axis=0)
+        p_high = np.percentile(points_base, 95, axis=0)
+        center = (p_low + p_high) / 2.0
+        size = np.maximum(p_high - p_low + 0.02, 1e-3)
         bbox = [
             float(center[0]),
             float(center[1]),
@@ -527,6 +545,10 @@ class RgbdDetectTrackNode(NodeWrapper):
     ) -> np.ndarray | None:
         raw_area = int(mask.sum())
         if raw_area < self.mask_area_min_px:
+            return None
+
+        total_pixels = mask.shape[0] * mask.shape[1]
+        if total_pixels > 0 and raw_area / total_pixels > self.mask_area_max_ratio:
             return None
 
         cleaned = mask & (~person_mask)
