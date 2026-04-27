@@ -6,8 +6,9 @@
 功能描述：
     - 订阅 /perception/tracked_objects 获取跟踪目标列表
     - 订阅 /perception/selected_target 获取选中的目标 track_id
-    - 计算目标在 base_link 下的位姿，沿EE→物体连线靠近
-    - 不超过70%臂展，距物体表面至少15cm
+    - 计算目标在 base_link 下的位姿，沿基座→物体径向方向靠近
+    - 不超过70%臂展，距物体表面至少MIN_CLEARANCE，目标点离基座至少MIN_TARGET_DIST
+    - EE朝向始终指向物体，确保相机视野覆盖目标
     - IK无解时降级为 joint1-only 水平旋转模式
     - 目标丢失超过5秒自动回到 View 位姿
 
@@ -55,6 +56,7 @@ from vision_msgs.msg import Detection3DArray
 
 from robotic_follower.util.wrapper import NodeWrapper
 
+
 # View 位姿关节角 (度): joint1=0, joint2=-36.04, joint3=-21.09, joint4=0, joint5=-89.63, joint6=0
 VIEW_POSE_RAD = [math.radians(d) for d in [0, -36.04, -21.09, 0, -89.63, 0]]
 VIEW_POSE_TIMEOUT_SEC = 8.0
@@ -62,6 +64,7 @@ VIEW_POSE_TIMEOUT_SEC = 8.0
 MAX_REACH = 0.38
 MIN_CLEARANCE = 0.22
 MIN_APPROACH_DIST = 0.15
+MIN_TARGET_DIST = 0.25
 MIN_EE_HEIGHT = 0.10
 POSITION_TOLERANCE = 0.01
 ORIENTATION_TOLERANCE = 0.52
@@ -317,7 +320,10 @@ class FollowingNode(NodeWrapper):
         return self._rotation_matrix_to_quaternion(R)
 
     def _compute_target_pose(self, x, y, z, dx, dy, dz):
-        """计算跟随目标位姿: EE沿当前位姿→物体连线靠近, 不超过70%臂展。
+        """计算跟随目标位姿: 沿基座→物体径向方向靠近, 不超过70%臂展。
+
+        目标点沿 base→obj 方向退回 clearance 距离, 消除当前EE位置引起的侧偏。
+        朝向计算仍使用目标位姿→物体方向, 确保相机指向物体。
 
         Args:
             x, y, z: 物体bbox中心 (base_link坐标系)
@@ -330,27 +336,33 @@ class FollowingNode(NodeWrapper):
         obj_half = math.sqrt((dx / 2.0) ** 2 + (dy / 2.0) ** 2 + (dz / 2.0) ** 2)
         clearance = obj_half + MIN_CLEARANCE
 
-        ee_pos = self._get_current_ee_position()
-
-        approach_dir = obj_pos - ee_pos
-        approach_dist = np.linalg.norm(approach_dir)
-        if approach_dist < 1e-6:
+        obj_dist = np.linalg.norm(obj_pos)
+        if obj_dist < 1e-6:
             return None
-        approach_unit = approach_dir / approach_dist
+        obj_dir = obj_pos / obj_dist
 
-        target_pos = obj_pos - approach_unit * clearance
+        target_pos = obj_pos - obj_dir * clearance
 
-        target_dist_from_base = np.linalg.norm(target_pos)
-        if target_dist_from_base > MAX_REACH:
-            target_pos = target_pos / target_dist_from_base * MAX_REACH
-            target_dist_from_base = np.linalg.norm(target_pos)
-        if target_dist_from_base < MIN_APPROACH_DIST:
-            return None
+        target_dist = np.linalg.norm(target_pos)
+        if target_dist > MAX_REACH:
+            target_pos = target_pos / target_dist * MAX_REACH
+            target_dist = np.linalg.norm(target_pos)
+        if target_dist < MIN_TARGET_DIST:
+            target_pos = target_pos / target_dist * MIN_TARGET_DIST
+            target_dist = MIN_TARGET_DIST
 
         if target_pos[2] < MIN_EE_HEIGHT:
             target_pos[2] = MIN_EE_HEIGHT
-            if np.linalg.norm(target_pos) > MAX_REACH:
+            target_dist = np.linalg.norm(target_pos)
+            if target_dist > MAX_REACH:
                 return None
+
+        dist_to_obj = np.linalg.norm(target_pos - obj_pos)
+        if dist_to_obj < clearance:
+            self._warn(
+                f"目标点离物体过近 ({dist_to_obj:.3f}m < {clearance:.3f}m), 降级"
+            )
+            return None
 
         orientation = self._compute_reach_orientation(target_pos, obj_pos)
         return (target_pos, orientation)
