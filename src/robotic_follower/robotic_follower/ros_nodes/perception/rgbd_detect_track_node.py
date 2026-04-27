@@ -48,6 +48,8 @@ class RgbdDetectTrackNode(NodeWrapper):
             "mask_area_min_px": 200,
             "mask_area_max_ratio": 0.40,
             "mask_aspect_ratio_max": 6.0,
+            "mask_erode_kernel": 3,
+            "mask_erode_iterations": 1,
             "z_trim_quantile": 0.08,
             "table_margin_m": 0.01,
             "table_z": 0.0,
@@ -58,12 +60,12 @@ class RgbdDetectTrackNode(NodeWrapper):
             "tf_fallback_warn_every": 45,
             "table_warn_every": 45,
             "sync_warn_every": 45,
-            "association_dist_gate_m": 0.25,
-            "detection_merge_dist_m": 0.06,
+            "association_dist_gate_m": 0.50,
+            "detection_merge_dist_m": 0.10,
             "detection_merge_iou_min": 0.18,
-            "duplicate_track_dist_m": 0.06,
-            "max_age": 20,
-            "min_hits": 2,
+            "duplicate_track_dist_m": 0.15,
+            "max_age": 30,
+            "min_hits": 1,
             "occlusion_ratio_max_for_grasp": 0.45,
             "max_non_person_distance_m": 1.2,
             "fallback_to_source_frame_when_tf_disconnected": True,
@@ -88,6 +90,14 @@ class RgbdDetectTrackNode(NodeWrapper):
             "mask_aspect_ratio_max", 6.0
         )
 
+        self.mask_erode_kernel = self.declare_and_get_parameter("mask_erode_kernel", 3)
+        self.mask_erode_iterations = self.declare_and_get_parameter(
+            "mask_erode_iterations", 1
+        )
+        self._erode_kernel = np.ones(
+            (self.mask_erode_kernel, self.mask_erode_kernel), dtype=np.uint8
+        )
+
         self.z_trim_quantile = self.declare_and_get_parameter("z_trim_quantile", 0.08)
         self.table_margin_m = self.declare_and_get_parameter("table_margin_m", 0.01)
         self.table_z = self.declare_and_get_parameter("table_z", 0.0)
@@ -109,19 +119,19 @@ class RgbdDetectTrackNode(NodeWrapper):
         self.table_warn_every = self.declare_and_get_parameter("table_warn_every", 45)
         self.sync_warn_every = self.declare_and_get_parameter("sync_warn_every", 45)
         self.association_dist_gate_m = self.declare_and_get_parameter(
-            "association_dist_gate_m", 0.25
+            "association_dist_gate_m", 0.50
         )
         self.detection_merge_dist_m = self.declare_and_get_parameter(
-            "detection_merge_dist_m", 0.06
+            "detection_merge_dist_m", 0.10
         )
         self.detection_merge_iou_min = self.declare_and_get_parameter(
             "detection_merge_iou_min", 0.18
         )
         self.duplicate_track_dist_m = self.declare_and_get_parameter(
-            "duplicate_track_dist_m", 0.06
+            "duplicate_track_dist_m", 0.15
         )
-        self.max_age = self.declare_and_get_parameter("max_age", 20)
-        self.min_hits = self.declare_and_get_parameter("min_hits", 2)
+        self.max_age = self.declare_and_get_parameter("max_age", 30)
+        self.min_hits = self.declare_and_get_parameter("min_hits", 1)
         self.occlusion_ratio_max_for_grasp = self.declare_and_get_parameter(
             "occlusion_ratio_max_for_grasp", 0.45
         )
@@ -551,6 +561,14 @@ class RgbdDetectTrackNode(NodeWrapper):
         if total_pixels > 0 and raw_area / total_pixels > self.mask_area_max_ratio:
             return None
 
+        if self.mask_erode_iterations > 0 and self.mask_erode_kernel > 0:
+            mask_u8 = mask.astype(np.uint8)
+            mask = cv2.erode(
+                mask_u8, self._erode_kernel, iterations=self.mask_erode_iterations
+            ).astype(bool)
+            if mask.sum() < self.mask_area_min_px:
+                return None
+
         cleaned = mask & (~person_mask)
         if cleaned.sum() < self.mask_area_min_px:
             return None
@@ -863,7 +881,7 @@ class RgbdDetectTrackNode(NodeWrapper):
             if len(det_centers) > 0:
                 dists = np.linalg.norm(det_centers - center[None, :], axis=1)
                 k = int(np.argmin(dists))
-                if float(dists[k]) <= self.association_dist_gate_m * 1.5:
+                if float(dists[k]) <= self.association_dist_gate_m * 2.0:
                     d = detections[k]
                     quality["occlusion_ratio"] = d.occlusion_ratio
                     quality["graspable"] = d.graspable

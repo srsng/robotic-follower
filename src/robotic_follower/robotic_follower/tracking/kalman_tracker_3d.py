@@ -1,7 +1,14 @@
-"""Kalman 3D tracker with real state covariance and Hungarian matching.
+"""Kalman 3D tracker with Mahalanobis gating and Hungarian matching.
 
 State: [x, y, z, vx, vy, vz, sx, sy, sz]
 Measurement: [x, y, z, sx, sy, sz]
+
+Key improvements over v1:
+- Mahalanobis distance for association (adaptively widens gate for lost tracks)
+- Softer covariance clamping (allows uncertainty growth during occlusion)
+- Relaxed duplicate detection (no unconditional rejection at tiny distances)
+- Dynamic velocity decay during missing frames
+- Label-aware but not label-penalized cost matrix
 """
 
 from __future__ import annotations
@@ -36,29 +43,34 @@ class KalmanTrack3D:
 
 
 class KalmanTracker3D:
-    """Full Kalman filter tracker with Hungarian matching and covariance gating."""
+    """Full Kalman filter tracker with Hungarian matching and Mahalanobis gating."""
 
     STATE_DIM = 9
     MEAS_DIM = 6
 
     def __init__(
         self,
-        dist_gate_m: float = 0.25,
-        max_age: int = 20,
-        min_hits: int = 2,
+        dist_gate_m: float = 0.50,
+        max_age: int = 30,
+        min_hits: int = 1,
         size_alpha: float = 0.25,
-        duplicate_track_dist_m: float = 0.06,
-        q_pos: float = 0.004,
-        q_vel: float = 0.08,
-        q_size: float = 0.002,
-        r_pos: float = 0.008,
-        r_size: float = 0.004,
-        p_init_pos: float = 0.01,
-        p_init_vel: float = 0.5,
-        p_init_size: float = 0.01,
-        missing_q_scale: float = 1.5,
+        duplicate_track_dist_m: float = 0.15,
+        q_pos: float = 0.015,
+        q_vel: float = 0.15,
+        q_size: float = 0.005,
+        r_pos: float = 0.02,
+        r_size: float = 0.008,
+        p_init_pos: float = 0.04,
+        p_init_vel: float = 1.0,
+        p_init_size: float = 0.02,
+        missing_q_scale: float = 2.5,
         missing_q_ramp_frames: int = 3,
         size_clamp_ratio: float = 0.4,
+        mahal_gate_chi2: float = 9.488,
+        max_cov_diag: float = 5.0,
+        label_match_bonus: float = 0.05,
+        size_weight: float = 0.6,
+        pre_filter_dist_m: float = 1.0,
     ):
         self.dist_gate_m = dist_gate_m
         self.max_age = max_age
@@ -76,6 +88,11 @@ class KalmanTracker3D:
         self.missing_q_scale = missing_q_scale
         self.missing_q_ramp_frames = missing_q_ramp_frames
         self.size_clamp_ratio = size_clamp_ratio
+        self.mahal_gate_chi2 = mahal_gate_chi2
+        self.max_cov_diag = max_cov_diag
+        self.label_match_bonus = label_match_bonus
+        self.size_weight = size_weight
+        self.pre_filter_dist_m = pre_filter_dist_m
 
         self.tracks: dict[int, KalmanTrack3D] = {}
         self._next_id = 1
@@ -150,19 +167,31 @@ class KalmanTracker3D:
         Q_base = self._make_Q()
 
         for tr in self.tracks.values():
-            if tr.missing_count == 0:
-                tr.state = F @ tr.state
-                q_scale = 1.0
-            else:
-                tr.state = F @ tr.state
-                tr.state[3:6] *= 0.85
+            tr.state = F @ tr.state
+
+            if tr.missing_count > 0:
+                decay = max(0.3, 0.85 ** (1.0 + tr.missing_count * 0.2))
+                tr.state[3:6] *= decay
                 q_scale = self.missing_q_scale ** (
                     tr.missing_count / self.missing_q_ramp_frames
                 )
+            else:
+                q_scale = 1.0
 
             Q = Q_base * q_scale
             tr.covariance = F @ tr.covariance @ F.T + Q
+            self._clamp_covariance(tr)
             tr.age += 1
+
+    def _clamp_covariance(self, track: KalmanTrack3D):
+        diag = np.diag(track.covariance).copy()
+        over = diag > self.max_cov_diag
+        if not over.any():
+            return
+        for idx in np.where(over)[0]:
+            scale = self.max_cov_diag / diag[idx]
+            track.covariance[idx, :] *= scale
+            track.covariance[:, idx] *= scale
 
     def _associate(
         self, detections: list[dict]
@@ -171,7 +200,7 @@ class KalmanTracker3D:
             return [], list(self.tracks.keys()), list(range(len(detections)))
 
         track_ids = list(self.tracks.keys())
-        cost = self._build_cost_matrix(detections, track_ids)
+        cost, pos_dists = self._build_cost_matrix(detections, track_ids)
 
         if cost.size == 0:
             return [], track_ids, list(range(len(detections)))
@@ -185,7 +214,9 @@ class KalmanTracker3D:
         gate = self.dist_gate_m
 
         for r, c in zip(row_indices, col_indices):
-            if cost[r, c] < gate * 2.0:
+            if cost[r, c] >= 1e6:
+                continue
+            if pos_dists[r, c] < gate:
                 matches.append((track_ids[r], c))
                 matched_track_indices.add(r)
                 matched_det_indices.add(c)
@@ -199,37 +230,49 @@ class KalmanTracker3D:
 
     def _build_cost_matrix(
         self, detections: list[dict], track_ids: list[int]
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
         INF = 1e6
         cost = np.full((len(track_ids), len(detections)), INF, dtype=np.float64)
+        pos_dists = np.full((len(track_ids), len(detections)), INF, dtype=np.float64)
 
         for i, tid in enumerate(track_ids):
             tr = self.tracks[tid]
             t_pos = tr.predicted_pos()
             t_size = tr.predicted_size()
-            pos_var = float(np.trace(tr.covariance[:3, :3]))
+            S_pos = tr.covariance[:3, :3]
+            pos_var = float(np.trace(S_pos))
+
+            S_reg = S_pos + np.eye(3, dtype=np.float64) * 1e-4
+            try:
+                S_inv = np.linalg.inv(S_reg)
+            except np.linalg.LinAlgError:
+                S_inv = np.eye(3, dtype=np.float64) / max(pos_var, 1e-3)
 
             for j, det in enumerate(detections):
                 d_bbox = np.asarray(det["bbox"], dtype=np.float64)
                 d_pos = d_bbox[0:3]
                 d_size = d_bbox[3:6]
 
-                dist = float(np.linalg.norm(t_pos - d_pos))
-                if dist > self.dist_gate_m * 2.5:
+                diff = t_pos - d_pos
+                eucl_dist = float(np.linalg.norm(diff))
+
+                if eucl_dist > self.pre_filter_dist_m:
                     continue
 
-                mahal_scale = 1.0 + pos_var * 0.5
-                dist_cost = dist / max(mahal_scale, 0.01)
+                pos_dists[i, j] = eucl_dist
+
+                mahal_sq = float(diff @ S_inv @ diff)
+                mahal_dist = np.sqrt(max(mahal_sq, 0.0))
 
                 size_diff = float(np.linalg.norm(t_size - d_size))
-                size_cost = 0.3 * size_diff
+                size_cost = self.size_weight * size_diff
 
                 label = det.get("label", "object")
-                label_cost = 0.15 if label != tr.label else 0.0
+                label_cost = 0.0 if label == tr.label else self.label_match_bonus
 
-                cost[i, j] = dist_cost + size_cost + label_cost
+                cost[i, j] = mahal_dist + size_cost + label_cost
 
-        return cost
+        return cost, pos_dists
 
     def _update_track(self, track: KalmanTrack3D, det: dict):
         bbox = np.asarray(det["bbox"], dtype=np.float64)
@@ -263,7 +306,7 @@ class KalmanTracker3D:
         track.hits += 1
         track.missing_count = 0
 
-        track.covariance = np.minimum(track.covariance, np.eye(self.STATE_DIM) * 1.0)
+        self._clamp_covariance(track)
 
     def _create_track(self, det: dict):
         bbox = np.asarray(det["bbox"], dtype=np.float64)
@@ -313,8 +356,6 @@ class KalmanTracker3D:
 
             if det_label == tr.label and size_ratio < 0.8:
                 return True
-            if dist < self.duplicate_track_dist_m * 0.5:
-                return True
         return False
 
     def _cleanup(self):
@@ -356,12 +397,21 @@ class KalmanTracker3D:
             if not keep[i]:
                 continue
             ci = np.asarray(candidates[i]["bbox"][:3], dtype=np.float64)
+            si = np.asarray(candidates[i]["bbox"][3:6], dtype=np.float64)
             for j in range(i + 1, len(candidates)):
                 if not keep[j]:
                     continue
                 cj = np.asarray(candidates[j]["bbox"][:3], dtype=np.float64)
+                sj = np.asarray(candidates[j]["bbox"][3:6], dtype=np.float64)
                 dist = float(np.linalg.norm(ci - cj))
                 if dist > self.duplicate_track_dist_m:
+                    continue
+
+                size_ratio_diff = abs(
+                    float(np.linalg.norm(si)) - float(np.linalg.norm(sj))
+                )
+                size_avg = max(float(np.linalg.norm(si)), float(np.linalg.norm(sj)), 1e-3)
+                if size_ratio_diff / size_avg > 0.6:
                     continue
 
                 ai = (int(candidates[i]["hits"]), float(candidates[i]["score"]))
