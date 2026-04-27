@@ -56,6 +56,7 @@ local_parameters = [
     {
         "name": "fused_config_file",
         "default": "model/config/yolov8_seg_rgbd_track.yaml",
+        # "default": "model/config/fastsam_rgbd_track.yaml",
         "description": "Config file for fused RGBD node",
     },
 ]
@@ -113,6 +114,7 @@ def generate_launch_description():
             {
                 "target_frame": "base_link",
                 "config_file": params["fused_config_file"],
+                "fallback_to_source_frame_when_tf_disconnected": False,
             }
         ],
     )

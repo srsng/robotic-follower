@@ -18,14 +18,14 @@ params:
   tf_fallback_warn_every: 45
   table_warn_every: 45
   sync_warn_every: 45
-  association_dist_gate_m: 0.25
-  detection_merge_dist_m: 0.06
-  detection_merge_iou_min: 0.48
-  duplicate_track_dist_m: 0.06
+  association_dist_gate_m: 0.50
+  detection_merge_dist_m: 0.10
+  detection_merge_iou_min: 0.18
+  duplicate_track_dist_m: 0.15
   max_non_person_distance_m: 1.2
   fallback_to_source_frame_when_tf_disconnected: true
-  max_age: 20
-  min_hits: 2
+  max_age: 30
+  min_hits: 1
   occlusion_ratio_max_for_grasp: 0.45
   exclude_labels:
     - dining table
