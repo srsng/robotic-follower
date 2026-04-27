@@ -54,21 +54,27 @@ from std_msgs.msg import Header, Int32
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3DArray
 
+from robotic_follower.util.perf import PerfTimer
 from robotic_follower.util.wrapper import NodeWrapper
 
 
 # View 位姿关节角 (度): joint1=0, joint2=-36.04, joint3=-21.09, joint4=0, joint5=-89.63, joint6=0
 VIEW_POSE_RAD = [math.radians(d) for d in [0, -36.04, -21.09, 0, -89.63, 0]]
 VIEW_POSE_TIMEOUT_SEC = 8.0
+VIEW_RETRY_INTERVAL_SEC = 2.0
 
 MAX_REACH = 0.38
-MIN_CLEARANCE = 0.22
+MIN_CLEARANCE = 0.15
 MIN_APPROACH_DIST = 0.15
-MIN_TARGET_DIST = 0.25
-MIN_EE_HEIGHT = 0.10
+MIN_TARGET_DIST = 0.20
+MIN_EE_HEIGHT = 0.18
 POSITION_TOLERANCE = 0.01
 ORIENTATION_TOLERANCE = 0.52
 POSE_DISPLACEMENT_THRESHOLD = 0.03
+NUMERIC_EPS = 1e-6
+JOINT6_TOLERANCE = 0.01
+DEFAULT_REASSOC_GATE_M = 0.20
+DEFAULT_LOST_HOLD_SEC = 0.8
 
 
 class FollowingNode(NodeWrapper):
@@ -86,6 +92,12 @@ class FollowingNode(NodeWrapper):
             "selected_topic", "/perception/selected_target"
         )
         self.update_rate = self.declare_and_get_parameter("update_rate", 2.0)
+        self.reassoc_gate_m = float(
+            self.declare_and_get_parameter("reassoc_gate_m", DEFAULT_REASSOC_GATE_M)
+        )
+        self.lost_hold_sec = float(
+            self.declare_and_get_parameter("lost_hold_sec", DEFAULT_LOST_HOLD_SEC)
+        )
 
         # TF 初始化
         self.tf_buffer = Buffer()
@@ -106,6 +118,8 @@ class FollowingNode(NodeWrapper):
 
         # 状态
         self.selected_track_id: int | None = None
+        self._selected_label: str | None = None
+        self._last_seen_target: dict | None = None
         self.tracked_objects: list[dict] = []
         self.current_joint_positions: list[float] | None = None
         self.joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
@@ -113,6 +127,10 @@ class FollowingNode(NodeWrapper):
         # 超时回 View 位姿
         self._last_target_time: float | None = None
         self._returning_to_view: bool = False
+        self._view_goal_reached: bool = False
+        self._last_view_cmd_time: float = 0.0
+        self._tracked_frame_id: str = ""
+        self._last_frame_mismatch_warn_time: float = 0.0
 
         # 运动控制状态 (单规划模型)
         self._motion_lock = threading.Lock()
@@ -121,6 +139,18 @@ class FollowingNode(NodeWrapper):
         self._last_commanded_xyz: tuple[float, float, float] | None = None
         self._last_commanded_ee_pos: np.ndarray | None = None
         self._DISPLACEMENT_THRESHOLD = 0.01  # 1cm
+        self._motion_step_id = 0
+        self.perf_aggregate_interval = int(
+            self.declare_and_get_parameter("perf_aggregate_interval", 100)
+        )
+        self._motion_perf_timer = PerfTimer(
+            lambda level, msg, channel: self._log(level, msg, channel=channel),
+            channel="motion",
+            stats_channel="motion_stats",
+            aggregate_interval=self.perf_aggregate_interval,
+        )
+        self._goal_sent_ts: dict[int, float] = {}
+        self._goal_mode: dict[int, str] = {}
 
         # 添加地面障碍物
         self._add_ground_obstacle()
@@ -170,6 +200,7 @@ class FollowingNode(NodeWrapper):
 
     def tracked_callback(self, msg: Detection3DArray):
         """跟踪目标回调。"""
+        self._tracked_frame_id = msg.header.frame_id
         self.tracked_objects = []
         for det in msg.detections:
             bbox = det.bbox
@@ -207,10 +238,87 @@ class FollowingNode(NodeWrapper):
         track_id = msg.data
         if track_id > 0:
             self.selected_track_id = track_id
+            self._selected_label = None
+            self._last_seen_target = None
             self._info(f"选中目标: track_id={track_id}")
         else:
             self.selected_track_id = None
-            self._info("取消跟随")
+            self._selected_label = None
+            self._last_seen_target = None
+            self._info("取消跟随，强制回归 View 位姿")
+            self._force_return_to_view("cancel_tracking")
+
+    def _force_return_to_view(self, reason: str):
+        """强制回归 View 位姿。必要时取消当前目标并立即发送回位目标。"""
+        now = time.monotonic()
+
+        with self._motion_lock:
+            active_handle = self._active_goal_handle
+            self._active_goal_handle = None
+
+        if active_handle is not None:
+            self._warn(f"强制回位触发({reason})，取消当前运动")
+            try:
+                active_handle.cancel_goal_async()
+            except Exception as e:
+                self._warn(f"取消当前运动异常: {e}")
+
+        self._last_target_time = None
+        self._returning_to_view = True
+        self._view_goal_reached = False
+        self._last_view_cmd_time = now
+        self._last_seen_target = None
+        self._last_commanded_xyz = None
+        self._last_commanded_ee_pos = None
+
+        self._send_move_goal(VIEW_POSE_RAD, mode="view")
+
+    def _select_target_candidate(self) -> dict | None:
+        """选择本帧用于跟随的目标。
+
+        1) 优先按 selected_track_id 精确匹配
+        2) 若失配，按几何连续性进行重关联（可选标签一致）
+        """
+        if self.selected_track_id is None:
+            return None
+
+        exact = None
+        for obj in self.tracked_objects:
+            if obj["track_id"] == self.selected_track_id:
+                exact = obj
+                break
+        if exact is not None:
+            if self._selected_label is None:
+                self._selected_label = str(exact.get("label", "unknown"))
+            self._last_seen_target = exact
+            return exact
+
+        if self._last_seen_target is None:
+            return None
+
+        prev = np.array(self._last_seen_target["bbox"][:3], dtype=np.float64)
+        best_obj = None
+        best_dist = float("inf")
+        for obj in self.tracked_objects:
+            if self._selected_label is not None and str(obj.get("label", "unknown")) != self._selected_label:
+                continue
+            pos = np.array(obj["bbox"][:3], dtype=np.float64)
+            dist = float(np.linalg.norm(pos - prev))
+            if dist < best_dist:
+                best_dist = dist
+                best_obj = obj
+
+        if best_obj is not None and best_dist <= self.reassoc_gate_m:
+            new_track_id = best_obj.get("track_id")
+            if new_track_id is not None and new_track_id != self.selected_track_id:
+                self._warn(
+                    f"重关联目标: {self.selected_track_id} -> {new_track_id}, 距离={best_dist:.3f}m"
+                )
+                self.selected_track_id = int(new_track_id)
+            self._last_seen_target = best_obj
+            return best_obj
+
+        return None
 
     def _compute_follow_joints(
         self, target_x: float, target_y: float
@@ -301,16 +409,27 @@ class FollowingNode(NodeWrapper):
         approach_unit = approach / approach_norm
 
         ee_y = -approach_unit
-        world_up = np.array([0.0, 0.0, 1.0])
-        ee_x = np.cross(ee_y, world_up)
+        up_candidates = [
+            np.array([0.0, 0.0, 1.0]),
+            np.array([1.0, 0.0, 0.0]),
+            np.array([0.0, 1.0, 0.0]),
+        ]
 
-        if np.linalg.norm(ee_x) < 1e-6:
-            ee_x = np.array([1.0, 0.0, 0.0])
-        else:
-            ee_x = ee_x / np.linalg.norm(ee_x)
+        ee_x = None
+        for up in up_candidates:
+            candidate = np.cross(ee_y, up)
+            norm = np.linalg.norm(candidate)
+            if norm > NUMERIC_EPS:
+                ee_x = candidate / norm
+                break
+        if ee_x is None:
+            return (0.0, 0.0, 0.0, 1.0)
 
         ee_z = np.cross(ee_x, ee_y)
-        ee_z = ee_z / np.linalg.norm(ee_z)
+        ee_z_norm = np.linalg.norm(ee_z)
+        if ee_z_norm < NUMERIC_EPS:
+            return (0.0, 0.0, 0.0, 1.0)
+        ee_z = ee_z / ee_z_norm
 
         if ee_z[2] < 0:
             ee_x = -ee_x
@@ -320,10 +439,11 @@ class FollowingNode(NodeWrapper):
         return self._rotation_matrix_to_quaternion(R)
 
     def _compute_target_pose(self, x, y, z, dx, dy, dz):
-        """计算跟随目标位姿: 沿基座→物体径向方向靠近, 不超过70%臂展。
+        """计算跟随目标位姿: 在水平面保持安全距离并朝向物体。
 
-        目标点沿 base→obj 方向退回 clearance 距离, 消除当前EE位置引起的侧偏。
-        朝向计算仍使用目标位姿→物体方向, 确保相机指向物体。
+        目标点在 XY 平面从物体朝基座方向退回，Z 不低于物体中心，
+        避免规划点落到物体下方或贴近地面。
+        朝向使用目标位姿→物体方向，确保相机指向物体。
 
         Args:
             x, y, z: 物体bbox中心 (base_link坐标系)
@@ -332,35 +452,53 @@ class FollowingNode(NodeWrapper):
         Returns:
             (position, quaternion) 或 None (降级为joint-only)
         """
-        obj_pos = np.array([x, y, z])
-        obj_half = math.sqrt((dx / 2.0) ** 2 + (dy / 2.0) ** 2 + (dz / 2.0) ** 2)
-        clearance = obj_half + MIN_CLEARANCE
+        obj_pos = np.array([x, y, z], dtype=np.float64)
 
-        obj_dist = np.linalg.norm(obj_pos)
-        if obj_dist < 1e-6:
-            return None
-        obj_dir = obj_pos / obj_dist
+        # 只用 bbox 的水平尺寸计算安全距离，防止被 z 尺寸拉得过远。
+        obj_radius_xy = math.hypot(dx / 2.0, dy / 2.0)
+        clearance_xy = obj_radius_xy + MIN_CLEARANCE
 
-        target_pos = obj_pos - obj_dir * clearance
+        # 在水平面上选择从物体指向基座的退让方向。
+        obj_xy = obj_pos[:2]
+        obj_xy_norm = np.linalg.norm(obj_xy)
+        if obj_xy_norm > NUMERIC_EPS:
+            retreat_dir_xy = obj_xy / obj_xy_norm
+        else:
+            ee_xy = self._get_current_ee_position()[:2]
+            fallback = ee_xy - obj_xy
+            fallback_norm = np.linalg.norm(fallback)
+            if fallback_norm < NUMERIC_EPS:
+                retreat_dir_xy = np.array([0.0, -1.0], dtype=np.float64)
+            else:
+                retreat_dir_xy = fallback / fallback_norm
+
+        target_xy = obj_xy - retreat_dir_xy * clearance_xy
+        target_z = max(float(z), MIN_EE_HEIGHT)
+        target_pos = np.array([target_xy[0], target_xy[1], target_z], dtype=np.float64)
+
+        # 70% 臂展约束：优先保留高度和方向，压缩水平半径。
+        max_xy = math.sqrt(max(MAX_REACH**2 - target_z**2, 0.0))
+        target_xy_norm = np.linalg.norm(target_xy)
+        if target_xy_norm > max_xy and target_xy_norm > NUMERIC_EPS:
+            target_xy = target_xy / target_xy_norm * max_xy
+            target_pos[0] = target_xy[0]
+            target_pos[1] = target_xy[1]
+            target_xy_norm = np.linalg.norm(target_xy)
 
         target_dist = np.linalg.norm(target_pos)
-        if target_dist > MAX_REACH:
-            target_pos = target_pos / target_dist * MAX_REACH
-            target_dist = np.linalg.norm(target_pos)
         if target_dist < MIN_TARGET_DIST:
-            target_pos = target_pos / target_dist * MIN_TARGET_DIST
-            target_dist = MIN_TARGET_DIST
-
-        if target_pos[2] < MIN_EE_HEIGHT:
-            target_pos[2] = MIN_EE_HEIGHT
-            target_dist = np.linalg.norm(target_pos)
-            if target_dist > MAX_REACH:
+            if target_xy_norm < NUMERIC_EPS:
                 return None
+            min_xy = math.sqrt(max(MIN_TARGET_DIST**2 - target_z**2, 0.0))
+            target_xy = target_xy / target_xy_norm * min_xy
+            target_pos[0] = target_xy[0]
+            target_pos[1] = target_xy[1]
 
-        dist_to_obj = np.linalg.norm(target_pos - obj_pos)
-        if dist_to_obj < clearance:
+        # 水平面安全距离检查：避免切进 bbox。
+        dist_to_obj_xy = np.linalg.norm(target_pos[:2] - obj_pos[:2])
+        if dist_to_obj_xy < clearance_xy:
             self._warn(
-                f"目标点离物体过近 ({dist_to_obj:.3f}m < {clearance:.3f}m), 降级"
+                f"目标点水平距离过近 ({dist_to_obj_xy:.3f}m < {clearance_xy:.3f}m), 降级"
             )
             return None
 
@@ -478,9 +616,17 @@ class FollowingNode(NodeWrapper):
         ori_constraint.absolute_z_axis_tolerance = ORIENTATION_TOLERANCE
         ori_constraint.weight = 1.0
 
+        joint6_constraint = JointConstraint()
+        joint6_constraint.joint_name = "joint6"
+        joint6_constraint.position = float(VIEW_POSE_RAD[5])
+        joint6_constraint.tolerance_above = JOINT6_TOLERANCE
+        joint6_constraint.tolerance_below = JOINT6_TOLERANCE
+        joint6_constraint.weight = 1.0
+
         goal_constraints = Constraints()
         goal_constraints.position_constraints.append(pos_constraint)
         goal_constraints.orientation_constraints.append(ori_constraint)
+        goal_constraints.joint_constraints.append(joint6_constraint)
         motion_plan_request.goal_constraints = [goal_constraints]
 
         motion_plan_request.planner_id = "RRTConnectkConfigDefault"
@@ -496,19 +642,40 @@ class FollowingNode(NodeWrapper):
 
         return goal
 
-    def _send_reach_goal(self, position, orientation_quat):
+    def _send_reach_goal(self, position, orientation_quat, perf=None, mode: str = "pose"):
         """非阻塞发送位姿跟随 MoveGroup goal。"""
+        t_goal_create_start = time.monotonic()
         goal = self.create_reach_goal(position, orientation_quat)
+        if perf is not None:
+            perf.record("goal_create", t_goal_create_start)
 
         with self._motion_lock:
             self._goal_generation += 1
             gen = self._goal_generation
+        self._goal_sent_ts[gen] = time.monotonic()
+        self._goal_mode[gen] = mode
+
+        def _emit_async_result(success: bool, error_code: int):
+            sent_ts = self._goal_sent_ts.pop(gen, None)
+            elapsed = max(0.0, time.monotonic() - sent_ts) if sent_ts else 0.0
+            mode_val = self._goal_mode.pop(gen, mode)
+            self._motion_perf_timer.emit(
+                {
+                    "step_id": gen,
+                    "mode": mode_val,
+                    "async_plan_exec": elapsed,
+                    "success": success,
+                    "error_code": error_code,
+                },
+                level="debug",
+            )
 
         def on_goal_response(future):
             try:
                 goal_handle = future.result()
                 if not goal_handle.accepted:
                     self._warn("MoveGroup 位姿目标被拒绝")
+                    _emit_async_result(False, -2)
                     with self._motion_lock:
                         if self._goal_generation == gen:
                             self._active_goal_handle = None
@@ -520,6 +687,7 @@ class FollowingNode(NodeWrapper):
                 goal_handle.get_result_async().add_done_callback(on_result)
             except Exception as e:
                 self._error(f"位姿目标响应异常: {e}")
+                _emit_async_result(False, -3)
                 with self._motion_lock:
                     if self._goal_generation == gen:
                         self._active_goal_handle = None
@@ -536,35 +704,68 @@ class FollowingNode(NodeWrapper):
                 error_code = res.result.error_code.val
                 if error_code != 1:
                     self._warn(f"位姿运动执行失败，错误码: {error_code}")
+                    if mode == "view":
+                        self._view_goal_reached = False
+                    _emit_async_result(False, int(error_code))
                 else:
                     self._info("位姿规划和执行成功完成")
+                    if mode == "view":
+                        self._view_goal_reached = True
+                    _emit_async_result(True, int(error_code))
             except Exception as e:
                 self._error(f"位姿结果回调异常: {e}")
+                if mode == "view":
+                    self._view_goal_reached = False
+                _emit_async_result(False, -4)
 
         ee_dist = np.linalg.norm(position)
         self._info(
             f"发送位姿目标: ({position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f}) "
             f"距基座={ee_dist:.3f}m"
         )
+        t_goal_send_start = time.monotonic()
         self.move_group_client.send_goal_async(goal).add_done_callback(on_goal_response)
+        if perf is not None:
+            perf.record("goal_send", t_goal_send_start)
 
-    def _send_move_goal(self, joints_rad: list[float]):
+    def _send_move_goal(self, joints_rad: list[float], perf=None, mode: str = "joint"):
         """非阻塞发送 MoveGroup goal，使用 generation 过滤过期回调。
 
         on_result 只处理当前 generation 的结果，旧 generation 的 result 静默丢弃。
         goal 完成后清除 _active_goal_handle，follow_step 即可发送下一个 goal。
         """
+        t_goal_create_start = time.monotonic()
         goal = self.create_move_group_goal(joints_rad)
+        if perf is not None:
+            perf.record("goal_create", t_goal_create_start)
 
         with self._motion_lock:
             self._goal_generation += 1
             gen = self._goal_generation
+        self._goal_sent_ts[gen] = time.monotonic()
+        self._goal_mode[gen] = mode
+
+        def _emit_async_result(success: bool, error_code: int):
+            sent_ts = self._goal_sent_ts.pop(gen, None)
+            elapsed = max(0.0, time.monotonic() - sent_ts) if sent_ts else 0.0
+            mode_val = self._goal_mode.pop(gen, mode)
+            self._motion_perf_timer.emit(
+                {
+                    "step_id": gen,
+                    "mode": mode_val,
+                    "async_plan_exec": elapsed,
+                    "success": success,
+                    "error_code": error_code,
+                },
+                level="debug",
+            )
 
         def on_goal_response(future):
             try:
                 goal_handle = future.result()
                 if not goal_handle.accepted:
                     self._warn("MoveGroup 目标被拒绝")
+                    _emit_async_result(False, -2)
                     with self._motion_lock:
                         if self._goal_generation == gen:
                             self._active_goal_handle = None
@@ -576,6 +777,7 @@ class FollowingNode(NodeWrapper):
                 goal_handle.get_result_async().add_done_callback(on_result)
             except Exception as e:
                 self._error(f"目标响应异常: {e}")
+                _emit_async_result(False, -3)
                 with self._motion_lock:
                     if self._goal_generation == gen:
                         self._active_goal_handle = None
@@ -592,53 +794,164 @@ class FollowingNode(NodeWrapper):
                 error_code = res.result.error_code.val
                 if error_code != 1:
                     self._warn(f"运动执行失败，错误码: {error_code}")
+                    if mode == "view":
+                        self._view_goal_reached = False
+                    _emit_async_result(False, int(error_code))
                 else:
                     self._info("规划和执行成功完成")
+                    if mode == "view":
+                        self._view_goal_reached = True
+                    _emit_async_result(True, int(error_code))
             except Exception as e:
                 self._error(f"结果回调异常: {e}")
+                if mode == "view":
+                    self._view_goal_reached = False
+                _emit_async_result(False, -4)
 
         self._info(f"发送目标 joint1={math.degrees(joints_rad[0]):.1f}°")
+        t_goal_send_start = time.monotonic()
         self.move_group_client.send_goal_async(goal).add_done_callback(on_goal_response)
+        if perf is not None:
+            perf.record("goal_send", t_goal_send_start)
 
     def follow_step(self):
         """执行一次跟随: 单规划模型，有活跃 goal 时跳过，否则按需发送。"""
         now = time.monotonic()
+        perf = self._motion_perf_timer.frame()
+        perf.mark("start")
+        self._motion_step_id += 1
+        mode = "none"
+        command_sent = False
 
         with self._motion_lock:
             has_active = self._active_goal_handle is not None
         if has_active:
+            perf.record("total_follow", "start")
+            perf.flush(
+                extra={
+                    "step_id": self._motion_step_id,
+                    "mode": mode,
+                    "command_sent": command_sent,
+                    "has_active_goal": True,
+                }
+            )
             return
 
         if self.selected_track_id is None:
             self._last_target_time = None
             self._returning_to_view = False
+            self._view_goal_reached = False
+            self._last_view_cmd_time = 0.0
             self._last_commanded_xyz = None
             self._last_commanded_ee_pos = None
+            perf.record("total_follow", "start")
+            perf.flush(
+                extra={
+                    "step_id": self._motion_step_id,
+                    "mode": mode,
+                    "command_sent": command_sent,
+                    "selected": False,
+                }
+            )
             return
 
-        target = None
-        for obj in self.tracked_objects:
-            if obj["track_id"] == self.selected_track_id:
-                target = obj
-                break
+        if self._tracked_frame_id and self._tracked_frame_id != "base_link":
+            if now - self._last_frame_mismatch_warn_time > 1.0:
+                self._warn(
+                    "tracked_objects frame_id 非 base_link: "
+                    f"{self._tracked_frame_id}, 跳过本次跟随"
+                )
+                self._last_frame_mismatch_warn_time = now
+            perf.record("total_follow", "start")
+            perf.flush(
+                extra={
+                    "step_id": self._motion_step_id,
+                    "mode": mode,
+                    "command_sent": command_sent,
+                    "frame_mismatch": True,
+                }
+            )
+            return
+
+        t_lookup_start = perf.mark("target_lookup_start")
+        target = self._select_target_candidate()
+        perf.record("target_lookup", t_lookup_start)
 
         if target is not None:
             self._last_target_time = now
             self._returning_to_view = False
+            self._view_goal_reached = False
         else:
             if self._last_target_time is None:
+                perf.record("total_follow", "start")
+                perf.flush(
+                    extra={
+                        "step_id": self._motion_step_id,
+                        "mode": mode,
+                        "command_sent": command_sent,
+                        "target_visible": False,
+                    }
+                )
                 return
 
             elapsed = now - self._last_target_time
+            if elapsed <= self.lost_hold_sec:
+                perf.record("total_follow", "start")
+                perf.flush(
+                    extra={
+                        "step_id": self._motion_step_id,
+                        "mode": mode,
+                        "command_sent": command_sent,
+                        "target_visible": False,
+                        "lost_stage": "hold",
+                        "elapsed_since_last_target": elapsed,
+                    }
+                )
+                return
+
             if elapsed <= VIEW_POSE_TIMEOUT_SEC:
+                perf.record("total_follow", "start")
+                perf.flush(
+                    extra={
+                        "step_id": self._motion_step_id,
+                        "mode": mode,
+                        "command_sent": command_sent,
+                        "target_visible": False,
+                        "lost_stage": "wait_view",
+                        "elapsed_since_last_target": elapsed,
+                    }
+                )
                 return
 
             if not self._returning_to_view:
                 self._info("目标丢失超过阈值，回到 View 位姿")
                 self._returning_to_view = True
+                self._view_goal_reached = False
+                self._last_view_cmd_time = now
                 self._last_commanded_xyz = None
                 self._last_commanded_ee_pos = None
-                self._send_move_goal(VIEW_POSE_RAD)
+                mode = "view"
+                self._send_move_goal(VIEW_POSE_RAD, perf=perf, mode=mode)
+                command_sent = True
+            elif (
+                not self._view_goal_reached
+                and now - self._last_view_cmd_time >= VIEW_RETRY_INTERVAL_SEC
+            ):
+                self._warn("View 位姿未完成，重试发送回位目标")
+                self._last_view_cmd_time = now
+                mode = "view"
+                self._send_move_goal(VIEW_POSE_RAD, perf=perf, mode=mode)
+                command_sent = True
+            perf.record("total_follow", "start")
+            perf.flush(
+                extra={
+                    "step_id": self._motion_step_id,
+                    "mode": mode,
+                    "command_sent": command_sent,
+                    "target_visible": False,
+                    "elapsed_since_last_target": elapsed,
+                }
+            )
             return
 
         target_x, target_y, target_z, dx, dy, dz = (
@@ -650,40 +963,83 @@ class FollowingNode(NodeWrapper):
             target["bbox"][5],
         )
 
-        if self._last_commanded_xyz is not None:
+        t_pose_compute_start = perf.mark("target_pose_compute_start")
+        target_pose = self._compute_target_pose(target_x, target_y, target_z, dx, dy, dz)
+        perf.record("target_pose_compute", t_pose_compute_start)
+
+        if self._last_commanded_xyz is not None and target_pose is not None:
             dx_disp = target_x - self._last_commanded_xyz[0]
             dy_disp = target_y - self._last_commanded_xyz[1]
             dz_disp = target_z - self._last_commanded_xyz[2]
-            dist = math.sqrt(dx_disp**2 + dy_disp**2 + dz_disp**2)
-            if dist < self._DISPLACEMENT_THRESHOLD:
+            obj_disp = math.sqrt(dx_disp**2 + dy_disp**2 + dz_disp**2)
+            ee_disp = np.linalg.norm(target_pose[0] - self._last_commanded_ee_pos) if self._last_commanded_ee_pos is not None else float("inf")
+            if obj_disp < self._DISPLACEMENT_THRESHOLD and ee_disp < POSE_DISPLACEMENT_THRESHOLD:
+                perf.record("total_follow", "start")
+                perf.flush(
+                    extra={
+                        "step_id": self._motion_step_id,
+                        "mode": mode,
+                        "command_sent": command_sent,
+                        "target_displacement": obj_disp,
+                    }
+                )
                 return
 
         self._info(f"目标位置: ({target_x:.3f}, {target_y:.3f}, {target_z:.3f})")
         self._publish_follow_target_pose(target_x, target_y, target_z)
-
-        target_pose = self._compute_target_pose(
-            target_x, target_y, target_z, dx, dy, dz
-        )
 
         if target_pose is not None:
             pos, quat = target_pose
             if self._last_commanded_ee_pos is not None:
                 ee_disp = np.linalg.norm(pos - self._last_commanded_ee_pos)
                 if ee_disp < POSE_DISPLACEMENT_THRESHOLD:
+                    perf.record("total_follow", "start")
+                    perf.flush(
+                        extra={
+                            "step_id": self._motion_step_id,
+                            "mode": mode,
+                            "command_sent": command_sent,
+                            "ee_displacement": float(ee_disp),
+                        }
+                    )
                     return
             self._info(f"跟随位姿: ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f})")
-            self._send_reach_goal(pos, quat)
+            mode = "pose"
+            self._send_reach_goal(pos, quat, perf=perf, mode=mode)
+            command_sent = True
             self._last_commanded_ee_pos = pos.copy()
         else:
+            t_joint_compute_start = perf.mark("joint_compute_start")
             joints = self._compute_follow_joints(target_x, target_y)
+            perf.record("joint_compute", t_joint_compute_start)
             if joints is None:
+                perf.record("total_follow", "start")
+                perf.flush(
+                    extra={
+                        "step_id": self._motion_step_id,
+                        "mode": mode,
+                        "command_sent": command_sent,
+                        "joint_compute_ok": False,
+                    }
+                )
                 return
             yaw_deg = math.degrees(joints[0])
             self._info(f"跟随(降级): joint1={yaw_deg:.1f}°")
-            self._send_move_goal(joints)
+            mode = "joint"
+            self._send_move_goal(joints, perf=perf, mode=mode)
+            command_sent = True
             self._last_commanded_ee_pos = None
 
         self._last_commanded_xyz = (target_x, target_y, target_z)
+        perf.record("total_follow", "start")
+        perf.flush(
+            extra={
+                "step_id": self._motion_step_id,
+                "mode": mode,
+                "command_sent": command_sent,
+                "selected_track_id": int(self.selected_track_id),
+            }
+        )
 
 
 def main(args=None):

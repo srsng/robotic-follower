@@ -24,6 +24,7 @@ from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithP
 
 from robotic_follower.segmentation import create_segmenter_from_config
 from robotic_follower.tracking.kalman_tracker_3d import KalmanTracker3D
+from robotic_follower.util.perf import PerfTimer
 from robotic_follower.util.wrapper import NodeWrapper
 
 
@@ -157,6 +158,16 @@ class RgbdDetectTrackNode(NodeWrapper):
         self.last_table_reestimate_ns = 0
         self._warn_counters: dict[str, int] = {}
         self._current_output_frame = self.base_frame
+        self._perf_frame_id = 0
+        self.perf_aggregate_interval = int(
+            self.declare_and_get_parameter("perf_aggregate_interval", 100)
+        )
+        self._perf_timer = PerfTimer(
+            lambda level, msg, channel: self._log(level, msg, channel=channel),
+            channel="perf",
+            stats_channel="perf_stats",
+            aggregate_interval=self.perf_aggregate_interval,
+        )
 
         config_file = self.declare_and_get_parameter(
             "config_file", "model/config/yolov8_seg_rgbd_track.yaml"
@@ -274,6 +285,9 @@ class RgbdDetectTrackNode(NodeWrapper):
 
     def synced_callback(self, rgb_msg: Image, depth_msg: Image, info_msg: CameraInfo):
         t0 = time.monotonic()
+        perf = self._perf_timer.frame()
+        perf.mark("start")
+        self._perf_frame_id += 1
         try:
             current_stamp_ns = self._stamp_to_ns(rgb_msg.header.stamp)
             if self._prev_stamp_ns is not None:
@@ -281,34 +295,69 @@ class RgbdDetectTrackNode(NodeWrapper):
             else:
                 dt = 0.033
             self._prev_stamp_ns = current_stamp_ns
+            perf.record_value("dt", dt)
 
+            t_sync_start = perf.mark("sync_start")
             self._update_sync_skew(rgb_msg, depth_msg)
+            perf.record("sync_update", t_sync_start)
 
+            t_tf_start = perf.mark("tf_lookup_start")
             tf_data = self._lookup_transform(
                 depth_msg.header.frame_id, rgb_msg.header.stamp
             )
+            perf.record("tf_lookup", t_tf_start)
             if tf_data is None:
+                t_track_start = perf.mark("track_update_start")
                 tracked = self.tracker.update([], dt=dt)
+                perf.record("track_update", t_track_start)
+                t_pub_tracks_start = perf.mark("publish_tracks_start")
                 self._publish_tracks(tracked, rgb_msg.header, is_stale=True)
+                perf.record("publish_tracks", t_pub_tracks_start)
+                perf.record("total", "start")
+                perf.flush(
+                    extra={
+                        "frame_id": self._perf_frame_id,
+                        "n_raw": 0,
+                        "n_accepted": 0,
+                        "n_tracked": len(tracked),
+                        "tf_ok": False,
+                    }
+                )
                 return
             t_mat, is_stale, output_frame = tf_data
             self._current_output_frame = output_frame
+            perf.record_value("tf_ok", True)
 
             rgb = self.bridge.imgmsg_to_cv2(rgb_msg, desired_encoding="bgr8")
+            t_depth_start = perf.mark("depth_convert_start")
             depth = self._depth_to_meters(depth_msg)
+            perf.record("depth_convert", t_depth_start)
             if rgb.shape[:2] != depth.shape[:2]:
                 self._warn("RGB 和 Depth 分辨率不一致，跳过本帧")
+                perf.record("total", "start")
+                perf.flush(
+                    extra={
+                        "frame_id": self._perf_frame_id,
+                        "n_raw": 0,
+                        "n_accepted": 0,
+                        "n_tracked": 0,
+                        "shape_mismatch": True,
+                    }
+                )
                 return
 
             t_seg_start = time.monotonic()
             seg = self.segmenter.segment(rgb)
             t_seg = time.monotonic() - t_seg_start
+            perf.record_value("segmentation", t_seg)
             person_mask = seg["person_mask"]
 
             t_preprocess_start = time.monotonic()
+            t_mask_proc_start = perf.mark("mask_proc_start")
             detections: list[DetectionCandidate] = []
             debug_raw_masks: list[np.ndarray] = []
             debug_cleaned_masks: list[np.ndarray] = []
+            debug_depth_masks: list[np.ndarray] = []
             for mask, score, label in zip(
                 seg["object_masks"], seg["scores"], seg["labels"], strict=False
             ):
@@ -319,8 +368,13 @@ class RgbdDetectTrackNode(NodeWrapper):
                 cleaned_for_vis = self._compute_cleaned_mask(raw_mask, person_mask)
                 if cleaned_for_vis is None:
                     debug_cleaned_masks.append(np.zeros_like(raw_mask, dtype=bool))
+                    debug_depth_masks.append(np.zeros_like(raw_mask, dtype=bool))
                 else:
                     debug_cleaned_masks.append(cleaned_for_vis)
+                    depth_for_vis = self._erode_mask(cleaned_for_vis)
+                    if depth_for_vis.sum() < 20:
+                        depth_for_vis = cleaned_for_vis
+                    debug_depth_masks.append(depth_for_vis)
 
                 cand = self._build_detection_candidate(
                     mask=raw_mask,
@@ -334,19 +388,26 @@ class RgbdDetectTrackNode(NodeWrapper):
                 )
                 if cand is not None:
                     detections.append(cand)
+            perf.record("mask_proc", t_mask_proc_start)
 
+            t_merge_start = perf.mark("det_merge_start")
             detections = self._merge_detection_candidates(detections)
+            perf.record("det_merge", t_merge_start)
             t_preprocess = time.monotonic() - t_preprocess_start
+            perf.record_value("preprocess", t_preprocess)
 
             if self.enable_segmentation_debug_vis:
+                t_debug_vis_start = perf.mark("debug_vis_start")
                 self._publish_segmentation_debug(
                     header=rgb_msg.header,
                     rgb=rgb,
                     person_mask=person_mask,
                     raw_masks=debug_raw_masks,
                     cleaned_masks=debug_cleaned_masks,
+                    depth_masks=debug_depth_masks,
                     accepted_count=len(detections),
                 )
+                perf.record("debug_vis", t_debug_vis_start)
 
             self._log(
                 "debug",
@@ -354,7 +415,9 @@ class RgbdDetectTrackNode(NodeWrapper):
                 channel="detection",
             )
 
+            t_pub_det_start = perf.mark("publish_detections_start")
             self._publish_raw_detections(detections, rgb_msg.header)
+            perf.record("publish_detections", t_pub_det_start)
 
             det_dicts = [
                 {
@@ -366,17 +429,36 @@ class RgbdDetectTrackNode(NodeWrapper):
                 }
                 for d in detections
             ]
+            t_track_update_start = perf.mark("track_update_start")
             tracked = self.tracker.update(det_dicts, dt=dt)
+            perf.record("track_update", t_track_update_start)
+            t_quality_update_start = perf.mark("quality_update_start")
             self._update_track_quality(tracked, detections, is_stale)
+            perf.record("quality_update", t_quality_update_start)
             t_track_total = time.monotonic() - t0
+            perf.record_value("total", t_track_total)
             self._log(
                 "debug",
-                f"t_track_assoc_update={time.monotonic() - t0:.6f} t_total={t_track_total:.6f} n_tracked={len(tracked)}",
+                f"t_track_assoc_update={perf._values.get('track_update', 0.0):.6f} t_total={t_track_total:.6f} n_tracked={len(tracked)}",
                 channel="tracking",
             )
+            t_pub_tracks_start = perf.mark("publish_tracks_start")
             self._publish_tracks(tracked, rgb_msg.header, is_stale=is_stale)
+            perf.record("publish_tracks", t_pub_tracks_start)
 
+            t_table_start = perf.mark("table_est_start")
             self._maybe_reestimate_table(depth, info_msg, t_mat)
+            perf.record("table_est", t_table_start)
+            perf.flush(
+                extra={
+                    "frame_id": self._perf_frame_id,
+                    "n_raw": len(seg["object_masks"]),
+                    "n_accepted": len(detections),
+                    "n_tracked": len(tracked),
+                    "tf_age_ms": self.last_tf_age_ms,
+                    "sync_skew_ms": self.last_sync_skew_ms,
+                }
+            )
         except Exception as exc:
             self._error(f"融合节点处理失败: {exc}")
 
@@ -497,6 +579,10 @@ class RgbdDetectTrackNode(NodeWrapper):
         if cleaned is None:
             return None
 
+        depth_mask = self._erode_mask(cleaned)
+        if depth_mask.sum() < 20:
+            depth_mask = cleaned
+
         ys, xs = np.where(cleaned)
         if len(xs) == 0:
             return None
@@ -506,18 +592,17 @@ class RgbdDetectTrackNode(NodeWrapper):
         if aspect > self.mask_aspect_ratio_max:
             return None
 
-        points_cam, valid_ratio = self._mask_to_points(depth, cleaned, info_msg)
+        points_cam, valid_ratio = self._mask_to_points(depth, depth_mask, info_msg)
         if valid_ratio < self.depth_valid_ratio_min or len(points_cam) < 20:
-            return None
+            if depth_mask is not cleaned:
+                points_cam, valid_ratio = self._mask_to_points(
+                    depth, cleaned, info_msg
+                )
+            if valid_ratio < self.depth_valid_ratio_min or len(points_cam) < 20:
+                return None
 
         points_base = self._transform_points(points_cam, t_mat)
         points_base = self._filter_points(points_base)
-        if len(points_base) < 10:
-            return None
-
-        points_base = points_base[
-            points_base[:, 2] > (self.table_z + self.table_margin_m)
-        ]
         if len(points_base) < 10:
             return None
 
@@ -561,14 +646,6 @@ class RgbdDetectTrackNode(NodeWrapper):
         if total_pixels > 0 and raw_area / total_pixels > self.mask_area_max_ratio:
             return None
 
-        if self.mask_erode_iterations > 0 and self.mask_erode_kernel > 0:
-            mask_u8 = mask.astype(np.uint8)
-            mask = cv2.erode(
-                mask_u8, self._erode_kernel, iterations=self.mask_erode_iterations
-            ).astype(bool)
-            if mask.sum() < self.mask_area_min_px:
-                return None
-
         cleaned = mask & (~person_mask)
         if cleaned.sum() < self.mask_area_min_px:
             return None
@@ -577,6 +654,16 @@ class RgbdDetectTrackNode(NodeWrapper):
             return None
         return cleaned
 
+    def _erode_mask(self, mask: np.ndarray) -> np.ndarray:
+        """对掩码做形态学腐蚀, 仅用于深度采样以抑制边界深度噪声。"""
+        if self.mask_erode_iterations <= 0 or self.mask_erode_kernel <= 0:
+            return mask
+        return cv2.erode(
+            mask.astype(np.uint8),
+            self._erode_kernel,
+            iterations=self.mask_erode_iterations,
+        ).astype(bool)
+
     def _publish_segmentation_debug(
         self,
         header,
@@ -584,6 +671,7 @@ class RgbdDetectTrackNode(NodeWrapper):
         person_mask: np.ndarray,
         raw_masks: list[np.ndarray],
         cleaned_masks: list[np.ndarray],
+        depth_masks: list[np.ndarray],
         accepted_count: int,
     ):
         overlay = rgb.copy()
@@ -612,6 +700,19 @@ class RgbdDetectTrackNode(NodeWrapper):
                 cv2.CHAIN_APPROX_SIMPLE,
             )
             cv2.drawContours(overlay, contours, -1, (255, 255, 0), 2)
+
+        for i, depth in enumerate(depth_masks):
+            if not depth.any():
+                continue
+            if i < len(cleaned_masks) and np.array_equal(depth, cleaned_masks[i]):
+                continue
+            depth_u8 = depth.astype(np.uint8) * 255
+            contours, _ = cv2.findContours(
+                depth_u8,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE,
+            )
+            cv2.drawContours(overlay, contours, -1, (255, 178, 0), 1)
 
         blended = cv2.addWeighted(rgb, 0.55, overlay, 0.45, 0.0)
 
