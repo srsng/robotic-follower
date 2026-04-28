@@ -130,6 +130,12 @@ class FastSAMSegmenter(SegmenterBase):
             "labels": labels,
         }
 
+    def segment_and_track(self, image_bgr: np.ndarray) -> dict:
+        """FastSAM does not support tracking. Falls back to segment()."""
+        result = self.segment(image_bgr)
+        result["track_ids"] = [None] * len(result["object_masks"])
+        return result
+
     def _estimate_person_mask(self, image_bgr: np.ndarray) -> np.ndarray:
         h, w = image_bgr.shape[:2]
         person_mask = np.zeros((h, w), dtype=bool)

@@ -35,6 +35,98 @@ class YoloV8SegSegmenter(SegmenterBase):
             self._error(f"Failed to load YOLOv8-seg model: {exc}")
             self.model = None
 
+    def segment_and_track(self, image_bgr: np.ndarray) -> dict:
+        """Segmentation with 2D tracking using model.track() + persist.
+
+        Uses ultralytics BoT-SORT tracker to maintain stable 2D track IDs
+        across frames, then provides those IDs alongside masks and scores.
+        Falls back to segment() if tracking fails or model is not loaded.
+        """
+        if self.model is None:
+            return self.segment(image_bgr)
+
+        h, w = image_bgr.shape[:2]
+        person_mask = np.zeros((h, w), dtype=bool)
+        object_masks: list[np.ndarray] = []
+        scores: list[float] = []
+        labels: list[str] = []
+        track_ids: list[int | None] = []
+
+        try:
+            results = self.model.track(
+                source=image_bgr,
+                persist=True,
+                tracker="botsort.yaml",
+                conf=self.conf_threshold,
+                iou=self.iou_threshold,
+                verbose=False,
+            )
+        except Exception as exc:
+            self._warn(f"model.track() failed, falling back to segment(): {exc}")
+            return self.segment(image_bgr)
+
+        if not results:
+            return {
+                "object_masks": [],
+                "person_mask": person_mask,
+                "scores": [],
+                "labels": [],
+                "track_ids": [],
+            }
+
+        result = results[0]
+        if result.masks is None or result.boxes is None:
+            return {
+                "object_masks": [],
+                "person_mask": person_mask,
+                "scores": [],
+                "labels": [],
+                "track_ids": [],
+            }
+
+        masks = result.masks.data.cpu().numpy()
+        classes = result.boxes.cls.cpu().numpy().astype(int)
+        confs = result.boxes.conf.cpu().numpy().astype(float)
+        names = result.names
+        ids = result.boxes.id
+        if ids is not None:
+            ids = ids.cpu().numpy().astype(int)
+        else:
+            ids = None
+
+        for idx, cls_id in enumerate(classes):
+            if isinstance(names, dict):
+                cls_name = names.get(int(cls_id), str(cls_id))
+            else:
+                cls_name = (
+                    names[int(cls_id)] if int(cls_id) < len(names) else str(cls_id)
+                )
+            mask = masks[idx] > 0.5
+            if mask.shape != (h, w):
+                mask = cv2.resize(
+                    mask.astype(np.uint8),
+                    (w, h),
+                    interpolation=cv2.INTER_NEAREST,
+                ).astype(bool)
+
+            tid = int(ids[idx]) if ids is not None and idx < len(ids) else None
+
+            if cls_name == "person":
+                person_mask |= mask
+            else:
+                object_masks.append(mask)
+                scores.append(float(confs[idx]))
+                labels.append(cls_name)
+                track_ids.append(tid)
+
+        return {
+            "object_masks": object_masks,
+            "person_mask": person_mask,
+            "scores": scores,
+            "labels": labels,
+            "track_ids": track_ids,
+        }
+
     def segment(self, image_bgr: np.ndarray) -> dict:
         if self.model is None:
             h, w = image_bgr.shape[:2]

@@ -75,12 +75,8 @@ ORIENTATION_TOLERANCE_Z = 0.25
 POSE_DISPLACEMENT_THRESHOLD = 0.03
 NUMERIC_EPS = 1e-6
 JOINT6_TOLERANCE = 0.01
-DEFAULT_REASSOC_GATE_M = 0.20
-DEFAULT_LOST_HOLD_SEC = 0.8
-DEFAULT_PREDICT_MAX_SPEED_MPS = 0.25
-DEFAULT_REASSOC_WINDOW_SEC = 1.0
-DEFAULT_REASSOC_MIN_SCORE = 0.35
-DEFAULT_REASSOC_MAX_SIZE_RATIO = 0.7
+DEFAULT_LOST_HOLD_SEC = 5.0
+DEFAULT_PREDICT_MAX_SPEED_MPS = 0.125
 
 
 class FollowingNode(NodeWrapper):
@@ -98,24 +94,6 @@ class FollowingNode(NodeWrapper):
             "selected_topic", "/perception/selected_target"
         )
         self.update_rate = self.declare_and_get_parameter("update_rate", 2.0)
-        self.reassoc_gate_m = float(
-            self.declare_and_get_parameter("reassoc_gate_m", DEFAULT_REASSOC_GATE_M)
-        )
-        self.reassoc_window_sec = float(
-            self.declare_and_get_parameter(
-                "reassoc_window_sec", DEFAULT_REASSOC_WINDOW_SEC
-            )
-        )
-        self.reassoc_min_score = float(
-            self.declare_and_get_parameter(
-                "reassoc_min_score", DEFAULT_REASSOC_MIN_SCORE
-            )
-        )
-        self.reassoc_max_size_ratio = float(
-            self.declare_and_get_parameter(
-                "reassoc_max_size_ratio", DEFAULT_REASSOC_MAX_SIZE_RATIO
-            )
-        )
         self.lost_hold_sec = float(
             self.declare_and_get_parameter("lost_hold_sec", DEFAULT_LOST_HOLD_SEC)
         )
@@ -331,80 +309,19 @@ class FollowingNode(NodeWrapper):
     def _select_target_candidate(self) -> dict | None:
         """选择本帧用于跟随的目标。
 
-        1) 优先按 selected_track_id 精确匹配
-        2) 若失配，在时间窗口内按几何+尺寸+分数进行重关联
+        优先按 selected_track_id 精确匹配。2D 追踪器提供稳定的 ID，
+        不再需要几何重关联。
         """
         if self.selected_track_id is None:
             return None
 
-        now = time.monotonic()
-
-        exact = None
         for obj in self.tracked_objects:
             if obj["track_id"] == self.selected_track_id:
-                exact = obj
-                break
-        if exact is not None:
-            if self._selected_label is None:
-                self._selected_label = str(exact.get("label", "unknown"))
-            self._last_seen_target = exact
-            self._last_exact_seen_time = now
-            return exact
-
-        if self._last_seen_target is None:
-            return None
-
-        if self._last_exact_seen_time is not None:
-            elapsed_since_last_exact = now - self._last_exact_seen_time
-            if elapsed_since_last_exact > self.reassoc_window_sec:
-                return None
-
-        prev_bbox = self._last_seen_target["bbox"]
-        prev_pos = np.array(prev_bbox[:3], dtype=np.float64)
-        prev_size = np.array(prev_bbox[3:6], dtype=np.float64)
-        prev_size_norm = float(np.linalg.norm(prev_size))
-        best_obj = None
-        best_dist = float("inf")
-        best_cost = float("inf")
-        for obj in self.tracked_objects:
-            if (
-                self._selected_label is not None
-                and str(obj.get("label", "unknown")) != self._selected_label
-            ):
-                continue
-            obj_score = float(obj.get("score", 0.0))
-            if obj_score < self.reassoc_min_score:
-                continue
-            obj_size = np.array(obj["bbox"][3:6], dtype=np.float64)
-            obj_size_norm = float(np.linalg.norm(obj_size))
-            if prev_size_norm > NUMERIC_EPS and obj_size_norm > NUMERIC_EPS:
-                size_ratio = max(obj_size_norm, prev_size_norm) / min(
-                    obj_size_norm, prev_size_norm
-                )
-                if size_ratio > self.reassoc_max_size_ratio:
-                    continue
-            pos = np.array(obj["bbox"][:3], dtype=np.float64)
-            dist = float(np.linalg.norm(pos - prev_pos))
-            score_bonus = 0.05 * obj_score
-            same_id_bonus = (
-                0.03 if obj.get("track_id") == self.selected_track_id else 0.0
-            )
-            cost = dist - score_bonus - same_id_bonus
-            if cost < best_cost:
-                best_cost = cost
-                best_dist = dist
-                best_obj = obj
-
-        if best_obj is not None and best_dist <= self.reassoc_gate_m:
-            new_track_id = best_obj.get("track_id")
-            if new_track_id is not None and new_track_id != self.selected_track_id:
-                self._info(
-                    f"重关联目标: {self.selected_track_id} -> {new_track_id}, "
-                    f"距离={best_dist:.3f}m, 分数={float(best_obj.get('score', 0)):.2f}"
-                )
-                self.selected_track_id = int(new_track_id)
-            self._last_seen_target = best_obj
-            return best_obj
+                if self._selected_label is None:
+                    self._selected_label = str(obj.get("label", "unknown"))
+                self._last_seen_target = obj
+                self._last_exact_seen_time = time.monotonic()
+                return obj
 
         return None
 
@@ -698,8 +615,8 @@ class FollowingNode(NodeWrapper):
         motion_plan_request.planner_id = "RRTConnectkConfigDefault"
         motion_plan_request.num_planning_attempts = 3
         motion_plan_request.allowed_planning_time = 2.0
-        motion_plan_request.max_velocity_scaling_factor = 0.5
-        motion_plan_request.max_acceleration_scaling_factor = 0.5
+        motion_plan_request.max_velocity_scaling_factor = 0.25
+        motion_plan_request.max_acceleration_scaling_factor = 0.25
 
         goal.request = motion_plan_request
         goal.planning_options.plan_only = False
@@ -779,8 +696,8 @@ class FollowingNode(NodeWrapper):
         motion_plan_request.planner_id = "RRTConnectkConfigDefault"
         motion_plan_request.num_planning_attempts = 3
         motion_plan_request.allowed_planning_time = 2.0
-        motion_plan_request.max_velocity_scaling_factor = 0.5
-        motion_plan_request.max_acceleration_scaling_factor = 0.5
+        motion_plan_request.max_velocity_scaling_factor = 0.25
+        motion_plan_request.max_acceleration_scaling_factor = 0.25
 
         goal.request = motion_plan_request
         goal.planning_options.plan_only = False
@@ -976,7 +893,8 @@ class FollowingNode(NodeWrapper):
             has_active = self._active_goal_handle is not None
         if has_active:
             if (
-                self.selected_track_id is not None
+                not self._returning_to_view
+                and self.selected_track_id is not None
                 and self._last_target_time is not None
                 and now - self._last_target_time > self.lost_hold_sec
             ):
@@ -1059,7 +977,6 @@ class FollowingNode(NodeWrapper):
             elapsed = now - self._last_target_time
 
             if elapsed <= self.lost_hold_sec:
-                self._cancel_active_goal("lost_hold_cancel_active")
                 perf.record("total_follow", "start")
                 perf.flush(
                     extra={
@@ -1160,7 +1077,7 @@ class FollowingNode(NodeWrapper):
                 )
                 return
 
-        self._info(f"目标位置: ({target_x:.3f}, {target_y:.3f}, {target_z:.3f})")
+        self._debug(f"目标位置: ({target_x:.3f}, {target_y:.3f}, {target_z:.3f})")
         self._publish_follow_target_pose(target_x, target_y, target_z)
 
         if target_pose is not None:
