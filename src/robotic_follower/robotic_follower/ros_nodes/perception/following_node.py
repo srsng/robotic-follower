@@ -8,6 +8,7 @@
     - 订阅 /perception/selected_target 获取选中的目标 track_id
     - 计算目标在 base_link 下的位姿，沿基座→物体径向方向靠近
     - 不超过70%臂展，距物体表面至少MIN_CLEARANCE，目标点离基座至少MIN_TARGET_DIST
+    - XY半径不低于MIN_XY_REACH(机械臂不可达区域)
     - EE朝向始终指向物体，确保相机视野覆盖目标
     - IK无解时降级为 joint1-only 水平旋转模式
     - 目标丢失超过5秒自动回到 View 位姿
@@ -64,10 +65,14 @@ VIEW_POSE_TIMEOUT_SEC = 8.0
 VIEW_RETRY_INTERVAL_SEC = 2.0
 VIEW_MAX_RETRIES = 3
 
+_PENDING = object()
+
 MAX_REACH = 0.38
 MIN_CLEARANCE = 0.15
 MIN_APPROACH_DIST = 0.15
 MIN_TARGET_DIST = 0.20
+MIN_XY_REACH = 0.04
+CAMERA_Z_OFFSET = 0.03
 MIN_EE_HEIGHT = 0.18
 POSITION_TOLERANCE = 0.01
 ORIENTATION_TOLERANCE_XY = 0.20
@@ -279,7 +284,7 @@ class FollowingNode(NodeWrapper):
         with self._motion_lock:
             active_handle = self._active_goal_handle
             self._active_goal_handle = None
-        if active_handle is None:
+        if active_handle is None or active_handle is _PENDING:
             return
         self._warn(f"取消活跃目标: {reason}")
         try:
@@ -537,7 +542,8 @@ class FollowingNode(NodeWrapper):
                 retreat_dir_xy = fallback / fallback_norm
 
         target_xy = obj_xy - retreat_dir_xy * clearance_xy
-        target_z = max(float(z), MIN_EE_HEIGHT)
+        target_z = max(float(z), MIN_EE_HEIGHT) - CAMERA_Z_OFFSET
+        target_z = max(target_z, 0.05)
         target_pos = np.array([target_xy[0], target_xy[1], target_z], dtype=np.float64)
 
         # 70% 臂展约束：优先保留高度和方向，压缩水平半径。
@@ -557,14 +563,19 @@ class FollowingNode(NodeWrapper):
             target_xy = target_xy / target_xy_norm * min_xy
             target_pos[0] = target_xy[0]
             target_pos[1] = target_xy[1]
+            target_xy_norm = np.linalg.norm(target_xy)
 
-        # 水平面安全距离检查：避免切进 bbox。
+        # XY 最小可达半径约束: joint1 轴线偏离基座中心 ~80mm, XY 过小 IK 无解。
+        target_xy_norm = np.linalg.norm(target_pos[:2])
+        if 0 < target_xy_norm < MIN_XY_REACH:
+            target_pos[:2] = target_pos[:2] / target_xy_norm * MIN_XY_REACH
+
         dist_to_obj_xy = np.linalg.norm(target_pos[:2] - obj_pos[:2])
-        if dist_to_obj_xy <= clearance_xy:
+        if dist_to_obj_xy < clearance_xy - NUMERIC_EPS:
             self._warn(
-                f"目标点水平距离过近 ({dist_to_obj_xy:.3f}m <= {clearance_xy:.3f}m), 降级"
+                f"目标过近({dist_to_obj_xy:.3f}m < {clearance_xy:.3f}m), "
+                f"已钳制在最小臂展距离, 无法进一步后退"
             )
-            return None
 
         orientation = self._compute_reach_orientation(target_pos, obj_pos)
         return (target_pos, orientation)
@@ -718,6 +729,7 @@ class FollowingNode(NodeWrapper):
         with self._motion_lock:
             self._goal_generation += 1
             gen = self._goal_generation
+            self._active_goal_handle = _PENDING
         self._goal_sent_ts[gen] = time.monotonic()
         self._goal_mode[gen] = mode
 
@@ -772,6 +784,8 @@ class FollowingNode(NodeWrapper):
                     self._warn(f"位姿运动执行失败，错误码: {error_code}")
                     if mode == "view":
                         self._view_goal_reached = False
+                    self._last_commanded_ee_pos = None
+                    self._last_commanded_xyz = None
                     _emit_async_result(False, int(error_code))
                 else:
                     self._info("位姿规划和执行成功完成")
@@ -808,6 +822,7 @@ class FollowingNode(NodeWrapper):
         with self._motion_lock:
             self._goal_generation += 1
             gen = self._goal_generation
+            self._active_goal_handle = _PENDING
         self._goal_sent_ts[gen] = time.monotonic()
         self._goal_mode[gen] = mode
 
@@ -862,6 +877,8 @@ class FollowingNode(NodeWrapper):
                     self._warn(f"运动执行失败，错误码: {error_code}")
                     if mode == "view":
                         self._view_goal_reached = False
+                    self._last_commanded_ee_pos = None
+                    self._last_commanded_xyz = None
                     _emit_async_result(False, int(error_code))
                 else:
                     self._info("规划和执行成功完成")
@@ -1002,6 +1019,25 @@ class FollowingNode(NodeWrapper):
                 and self._view_retry_count < VIEW_MAX_RETRIES
                 and now - self._last_view_cmd_time >= VIEW_RETRY_INTERVAL_SEC
             ):
+                if self.current_joint_positions is not None:
+                    joint_diff = max(
+                        abs(a - b)
+                        for a, b in zip(self.current_joint_positions, VIEW_POSE_RAD)
+                    )
+                    if joint_diff < math.radians(3.0):
+                        self._view_goal_reached = True
+                        self._info("已在 View 位姿附近，跳过重试")
+                        perf.record("total_follow", "start")
+                        perf.flush(
+                            extra={
+                                "step_id": self._motion_step_id,
+                                "mode": mode,
+                                "command_sent": command_sent,
+                                "target_visible": False,
+                                "elapsed_since_last_target": elapsed,
+                            }
+                        )
+                        return
                 self._view_retry_count += 1
                 self._warn(
                     f"View 位姿未完成，重试 ({self._view_retry_count}/{VIEW_MAX_RETRIES})"
