@@ -23,7 +23,7 @@ from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 
 from robotic_follower.segmentation import create_segmenter_from_config
-from robotic_follower.tracking.ema_tracker_3d import EMATracker3D
+from robotic_follower.tracking.kalman_tracker_3d import KalmanTracker3D
 from robotic_follower.util.perf import PerfTimer
 from robotic_follower.util.wrapper import NodeWrapper
 
@@ -35,16 +35,10 @@ class DetectionCandidate:
     label: str
     occlusion_ratio: float
     graspable: bool
-    track_id: int | None = None
 
 
 class RgbdDetectTrackNode(NodeWrapper):
-    """融合节点：2D追踪 + 3D Kalman滤波。
-
-    数据流:
-      RGB+Depth+CameraInfo → segment_and_track (2D masks + track_ids)
-      → 按 track_id 聚合 mask → 3D 投影 → Kalman 3D 滤波（2D ID优先关联）
-    """
+    """融合节点：分割、2.5D 投影、AABB、3D 追踪。"""
 
     def __init__(self):
         super().__init__("rgbd_detect_track_node")
@@ -71,11 +65,8 @@ class RgbdDetectTrackNode(NodeWrapper):
             "detection_merge_dist_m": 0.10,
             "detection_merge_iou_min": 0.18,
             "duplicate_track_dist_m": 0.15,
-            "max_age": 15,
+            "max_age": 30,
             "min_hits": 1,
-            "alpha_pos": 0.40,
-            "alpha_size": 0.20,
-            "velocity_decay": 0.70,
             "occlusion_ratio_max_for_grasp": 0.45,
             "max_non_person_distance_m": 1.2,
             "fallback_to_source_frame_when_tf_disconnected": True,
@@ -142,11 +133,8 @@ class RgbdDetectTrackNode(NodeWrapper):
         self.duplicate_track_dist_m = self.declare_and_get_parameter(
             "duplicate_track_dist_m", 0.15
         )
-        self.max_age = self.declare_and_get_parameter("max_age", 15)
+        self.max_age = self.declare_and_get_parameter("max_age", 30)
         self.min_hits = self.declare_and_get_parameter("min_hits", 1)
-        self.alpha_pos = self.declare_and_get_parameter("alpha_pos", 0.40)
-        self.alpha_size = self.declare_and_get_parameter("alpha_size", 0.20)
-        self.velocity_decay = self.declare_and_get_parameter("velocity_decay", 0.70)
         self.occlusion_ratio_max_for_grasp = self.declare_and_get_parameter(
             "occlusion_ratio_max_for_grasp", 0.45
         )
@@ -193,12 +181,10 @@ class RgbdDetectTrackNode(NodeWrapper):
         segmenter_cfg = config.get("segmenter", {"type": "yolov8_seg"})
         self.segmenter = create_segmenter_from_config(segmenter_cfg, parent_node=self)
 
-        self.tracker = EMATracker3D(
-            alpha_pos=self.alpha_pos,
-            alpha_size=self.alpha_size,
+        self.tracker = KalmanTracker3D(
+            dist_gate_m=self.association_dist_gate_m,
             max_age=self.max_age,
             min_hits=self.min_hits,
-            velocity_decay=self.velocity_decay,
             duplicate_track_dist_m=self.duplicate_track_dist_m,
         )
         self.track_quality: dict[int, dict] = {}
@@ -367,13 +353,10 @@ class RgbdDetectTrackNode(NodeWrapper):
                 return
 
             t_seg_start = time.monotonic()
-            seg = self.segmenter.segment_and_track(rgb)
+            seg = self.segmenter.segment(rgb)
             t_seg = time.monotonic() - t_seg_start
             perf.record_value("segmentation", t_seg)
             person_mask = seg["person_mask"]
-            track_ids: list[int | None] = seg.get(
-                "track_ids", [None] * len(seg["object_masks"])
-            )
 
             t_preprocess_start = time.monotonic()
             t_mask_proc_start = perf.mark("mask_proc_start")
@@ -382,12 +365,8 @@ class RgbdDetectTrackNode(NodeWrapper):
             debug_cleaned_masks: list[np.ndarray] = []
             debug_depth_masks: list[np.ndarray] = []
             collect_debug = self.enable_segmentation_debug_vis
-            for mask, score, label, track_id in zip(
-                seg["object_masks"],
-                seg["scores"],
-                seg["labels"],
-                track_ids,
-                strict=False,
+            for mask, score, label in zip(
+                seg["object_masks"], seg["scores"], seg["labels"], strict=False
             ):
                 if label in self.exclude_labels:
                     continue
@@ -421,7 +400,6 @@ class RgbdDetectTrackNode(NodeWrapper):
                     depth_mask=depth_m,
                 )
                 if cand is not None:
-                    cand.track_id = track_id
                     detections.append(cand)
             perf.record("mask_proc", t_mask_proc_start)
 
@@ -459,7 +437,6 @@ class RgbdDetectTrackNode(NodeWrapper):
                     "bbox": d.bbox,
                     "score": d.score,
                     "label": d.label,
-                    "2d_track_id": d.track_id,
                     "occlusion_ratio": d.occlusion_ratio,
                     "graspable": d.graspable,
                 }
@@ -477,13 +454,6 @@ class RgbdDetectTrackNode(NodeWrapper):
                 "debug",
                 f"t_seg={t_seg:.6f} t_preprocess={t_preprocess:.6f} n_raw={len(seg['object_masks'])} n_accepted={len(detections)}",
                 channel="detection",
-            )
-            det_2d_ids = [d.track_id for d in detections if d.track_id is not None]
-            tracked_3d_ids = [t["track_id"] for t in tracked]
-            self._log(
-                "debug",
-                f"2d_ids={det_2d_ids} tracked_3d_ids={tracked_3d_ids} n_tracked={len(tracked)}",
-                channel="tracking",
             )
             t_pub_tracks_start = perf.mark("publish_tracks_start")
             self._publish_tracks(tracked, rgb_msg.header, is_stale=is_stale)
@@ -783,68 +753,14 @@ class RgbdDetectTrackNode(NodeWrapper):
         if len(detections) <= 1:
             return detections
 
-        tracked_groups: dict[int | None, list[DetectionCandidate]] = {}
-        for d in detections:
-            key = d.track_id
-            tracked_groups.setdefault(key, []).append(d)
-
-        result: list[DetectionCandidate] = []
-        for tid, group in tracked_groups.items():
-            if tid is not None or len(group) == 1:
-                weighted = self._weighted_merge(group)
-                result.append(weighted)
-            else:
-                merged = self._merge_untracked_group(group)
-                result.extend(merged)
-
-        return result
-
-    def _weighted_merge(self, group: list[DetectionCandidate]) -> DetectionCandidate:
-        if len(group) == 1:
-            return group[0]
-
-        weights = np.asarray([max(1e-3, d.score) for d in group], dtype=np.float32)
-        weights /= float(weights.sum())
-        centers = np.asarray([d.bbox[:3] for d in group], dtype=np.float32)
-        sizes = np.asarray([d.bbox[3:6] for d in group], dtype=np.float32)
-        merged_center = (centers * weights[:, None]).sum(axis=0)
-        merged_size = np.max(sizes, axis=0)
-        merged_score = float(max(d.score for d in group))
-        merged_occ = float(min(d.occlusion_ratio for d in group))
-        merged_graspable = any(d.graspable for d in group)
-        merged_label = max(group, key=lambda d: d.score).label
-        merged_tid = group[0].track_id
-        if all(d.track_id == merged_tid for d in group):
-            tid = merged_tid
-        else:
-            tid = max(group, key=lambda d: d.score).track_id
-        return DetectionCandidate(
-            bbox=[
-                float(merged_center[0]),
-                float(merged_center[1]),
-                float(merged_center[2]),
-                float(merged_size[0]),
-                float(merged_size[1]),
-                float(merged_size[2]),
-                0.0,
-            ],
-            score=merged_score,
-            label=merged_label,
-            occlusion_ratio=merged_occ,
-            graspable=merged_graspable,
-            track_id=tid,
-        )
-
-    def _merge_untracked_group(
-        self, group: list[DetectionCandidate]
-    ) -> list[DetectionCandidate]:
-        ordered = sorted(group, key=lambda d: d.score, reverse=True)
+        ordered = sorted(detections, key=lambda d: d.score, reverse=True)
         keep: list[DetectionCandidate] = []
         used = [False] * len(ordered)
 
         for i, base in enumerate(ordered):
             if used[i]:
                 continue
+
             cluster = [base]
             used[i] = True
             base_center = np.asarray(base.bbox[:3], dtype=np.float32)
@@ -862,7 +778,40 @@ class RgbdDetectTrackNode(NodeWrapper):
                     cluster.append(other)
                     used[j] = True
 
-            keep.append(self._weighted_merge(cluster))
+            if len(cluster) == 1:
+                keep.append(base)
+                continue
+
+            weights = np.asarray(
+                [max(1e-3, d.score) for d in cluster], dtype=np.float32
+            )
+            weights /= float(weights.sum())
+            centers = np.asarray([d.bbox[:3] for d in cluster], dtype=np.float32)
+            sizes = np.asarray([d.bbox[3:6] for d in cluster], dtype=np.float32)
+            merged_center = (centers * weights[:, None]).sum(axis=0)
+            merged_size = np.max(sizes, axis=0)
+            merged_score = float(max(d.score for d in cluster))
+            merged_occ = float(min(d.occlusion_ratio for d in cluster))
+            merged_graspable = any(d.graspable for d in cluster)
+            merged_label = max(cluster, key=lambda d: d.score).label
+            keep.append(
+                DetectionCandidate(
+                    bbox=[
+                        float(merged_center[0]),
+                        float(merged_center[1]),
+                        float(merged_center[2]),
+                        float(merged_size[0]),
+                        float(merged_size[1]),
+                        float(merged_size[2]),
+                        0.0,
+                    ],
+                    score=merged_score,
+                    label=merged_label,
+                    occlusion_ratio=merged_occ,
+                    graspable=merged_graspable,
+                )
+            )
+
         return keep
 
     @staticmethod
@@ -1007,13 +956,14 @@ class RgbdDetectTrackNode(NodeWrapper):
         detections: list[DetectionCandidate],
         is_stale: bool,
     ):
-        det_by_tid: dict[int | None, DetectionCandidate] = {}
-        for d in detections:
-            if d.track_id is not None:
-                det_by_tid[d.track_id] = d
+        if detections:
+            det_centers = np.array([d.bbox[:3] for d in detections], dtype=np.float32)
+        else:
+            det_centers = np.empty((0, 3), dtype=np.float32)
 
         for tr in tracked:
             tid = int(tr["track_id"])
+            center = np.array(tr["bbox"][:3], dtype=np.float32)
             quality = {
                 "occlusion_ratio": 1.0,
                 "graspable": False,
@@ -1021,12 +971,15 @@ class RgbdDetectTrackNode(NodeWrapper):
                 "label": str(tr.get("label", "object")),
                 "score": float(tr.get("score", 0.0)),
             }
-            if tid in det_by_tid:
-                d = det_by_tid[tid]
-                quality["occlusion_ratio"] = d.occlusion_ratio
-                quality["graspable"] = d.graspable
-                quality["label"] = d.label
-                quality["score"] = d.score
+            if len(det_centers) > 0:
+                dists = np.linalg.norm(det_centers - center[None, :], axis=1)
+                k = int(np.argmin(dists))
+                if float(dists[k]) <= self.association_dist_gate_m * 2.0:
+                    d = detections[k]
+                    quality["occlusion_ratio"] = d.occlusion_ratio
+                    quality["graspable"] = d.graspable
+                    quality["label"] = d.label
+                    quality["score"] = d.score
             self.track_quality[tid] = quality
 
         alive = {int(t["track_id"]) for t in tracked}
