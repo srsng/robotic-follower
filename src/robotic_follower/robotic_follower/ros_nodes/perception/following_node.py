@@ -75,7 +75,7 @@ ORIENTATION_TOLERANCE_Z = 0.25
 POSE_DISPLACEMENT_THRESHOLD = 0.03
 NUMERIC_EPS = 1e-6
 JOINT6_TOLERANCE = 0.01
-DEFAULT_LOST_HOLD_SEC = 5.0
+DEFAULT_LOST_HOLD_SEC = 8.0
 DEFAULT_PREDICT_MAX_SPEED_MPS = 0.125
 
 
@@ -892,13 +892,6 @@ class FollowingNode(NodeWrapper):
         with self._motion_lock:
             has_active = self._active_goal_handle is not None
         if has_active:
-            if (
-                not self._returning_to_view
-                and self.selected_track_id is not None
-                and self._last_target_time is not None
-                and now - self._last_target_time > self.lost_hold_sec
-            ):
-                self._cancel_active_goal("target_lost_while_active")
             perf.record("total_follow", "start")
             perf.flush(
                 extra={
@@ -962,7 +955,6 @@ class FollowingNode(NodeWrapper):
             self._update_target_motion_model(target, now)
         else:
             if self._last_target_time is None:
-                self._cancel_active_goal("no_target_no_last_time")
                 perf.record("total_follow", "start")
                 perf.flush(
                     extra={
@@ -989,8 +981,6 @@ class FollowingNode(NodeWrapper):
                     }
                 )
                 return
-
-            self._cancel_active_goal("target_lost_cancel_active")
 
             if not self._returning_to_view:
                 self._info("目标丢失超过阈值，回到 View 位姿")

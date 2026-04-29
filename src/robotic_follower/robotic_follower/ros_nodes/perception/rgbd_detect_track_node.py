@@ -353,7 +353,7 @@ class RgbdDetectTrackNode(NodeWrapper):
                 return
 
             t_seg_start = time.monotonic()
-            seg = self.segmenter.segment(rgb)
+            seg = self.segmenter.segment_and_track(rgb)
             t_seg = time.monotonic() - t_seg_start
             perf.record_value("segmentation", t_seg)
             person_mask = seg["person_mask"]
