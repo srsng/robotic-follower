@@ -80,8 +80,8 @@ def generate_launch_description():
             "pointcloud.enable": "true",
             "enable_color": "true",
             "enable_depth": "true",
-            "depth_module.profile": "640x480x30",
-            "rgb_camera.profile": "640x480x30",
+            "depth_module.depth_profile": "640x480x6",
+            "rgb_camera.color_profile": "640x480x6",
             "camera_namespace": "camera",
             "publish_tf": "true",  # 相机发布 TF
             # "base_frame_id": "base_link",
