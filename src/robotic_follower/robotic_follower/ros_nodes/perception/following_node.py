@@ -78,6 +78,7 @@ POSITION_TOLERANCE = 0.01
 ORIENTATION_TOLERANCE_XY = 0.20
 ORIENTATION_TOLERANCE_Z = 0.25
 POSE_DISPLACEMENT_THRESHOLD = 0.03
+CAMERA_CENTER_THRESHOLD = math.radians(20)
 NUMERIC_EPS = 1e-6
 JOINT6_TOLERANCE = 0.01
 DEFAULT_LOST_HOLD_SEC = 8.0
@@ -456,6 +457,55 @@ class FollowingNode(NodeWrapper):
             )
         except Exception:
             return np.array([0.0, -0.295, 0.318])
+
+    def _compute_camera_angle_to_object(self, obj_pos: np.ndarray) -> float:
+        """计算物体偏离相机光轴的角度 (弧度)。
+
+        通过 TF 获取 camera_color_optical_frame 的位置和 Z 轴方向,
+        与 相机→物体 向量做夹角。TF 不可用时返回 0 (退化到位移检查)。
+
+        Args:
+            obj_pos: 物体中心位置 (base_link坐标系)
+
+        Returns:
+            偏离角度 (弧度), 0 表示正对相机中心
+        """
+        try:
+            t = self.tf_buffer.lookup_transform(
+                "base_link", "camera_color_optical_frame", rclpy.time.Time()
+            )
+        except Exception:
+            return 0.0
+
+        cam_pos = np.array([
+            t.transform.translation.x,
+            t.transform.translation.y,
+            t.transform.translation.z,
+        ])
+        q = t.transform.rotation
+        R = self._quaternion_to_rotation_matrix(q.x, q.y, q.z, q.w)
+        cam_z = R[:, 2]
+
+        to_obj = obj_pos - cam_pos
+        to_obj_norm = np.linalg.norm(to_obj)
+        if to_obj_norm < NUMERIC_EPS:
+            return 0.0
+        to_obj_unit = to_obj / to_obj_norm
+
+        cos_angle = float(np.clip(np.dot(cam_z, to_obj_unit), -1.0, 1.0))
+        return math.acos(cos_angle)
+
+    @staticmethod
+    def _quaternion_to_rotation_matrix(x, y, z, w):
+        """四元数转3x3旋转矩阵。"""
+        xx, yy, zz = x * x, y * y, z * z
+        xy, xz, yz = x * y, x * z, y * z
+        wx, wy, wz = w * x, w * y, w * z
+        return np.array([
+            [1 - 2*(yy + zz), 2*(xy - wz),     2*(xz + wy)    ],
+            [2*(xy + wz),     1 - 2*(xx + zz),  2*(yz - wx)    ],
+            [2*(xz - wy),     2*(yz + wx),      1 - 2*(xx + yy)],
+        ])
 
     def _compute_reach_orientation(self, ee_pos, obj_pos):
         """计算EE朝向: -Y轴指向物体, z轴允许倾斜但z分量必须为正。
@@ -1072,6 +1122,10 @@ class FollowingNode(NodeWrapper):
             target["bbox"][5],
         )
 
+        cam_angle = self._compute_camera_angle_to_object(
+            np.array([target_x, target_y, target_z])
+        )
+
         t_pose_compute_start = perf.mark("target_pose_compute_start")
         target_pose = self._compute_target_pose(
             target_x, target_y, target_z, dx, dy, dz
@@ -1091,6 +1145,7 @@ class FollowingNode(NodeWrapper):
             if (
                 obj_disp < self._DISPLACEMENT_THRESHOLD
                 and ee_disp < POSE_DISPLACEMENT_THRESHOLD
+                and cam_angle < CAMERA_CENTER_THRESHOLD
             ):
                 perf.record("total_follow", "start")
                 perf.flush(
@@ -1110,7 +1165,7 @@ class FollowingNode(NodeWrapper):
             pos, quat = target_pose
             if self._last_commanded_ee_pos is not None:
                 ee_disp = np.linalg.norm(pos - self._last_commanded_ee_pos)
-                if ee_disp < POSE_DISPLACEMENT_THRESHOLD:
+                if ee_disp < POSE_DISPLACEMENT_THRESHOLD and cam_angle < CAMERA_CENTER_THRESHOLD:
                     perf.record("total_follow", "start")
                     perf.flush(
                         extra={
