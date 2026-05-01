@@ -1,0 +1,73 @@
+TF Coordinate Tree
+=================
+Generated: 2026-04-29
+
+world
+  └── base_link (static, 10000 Hz)
+        └── link1_1_1 (dynamic, ~10.5 Hz)
+              └── link2_1_1 (dynamic, ~10.5 Hz)
+                    └── link3_1_1 (dynamic, ~10.5 Hz)
+                          └── link4_1_1 (dynamic, ~10.5 Hz)
+                                └── link5_1_1 (dynamic, ~10.5 Hz)
+                                      └── link6_1_1 (dynamic, ~10.5 Hz)
+                                            └── camera_bottom_screw_frame (static, 10000 Hz)
+                                                  └── camera_link (static, 10000 Hz)
+                                                        ├── camera_color_frame (static, 10000 Hz)
+                                                        │     └── camera_color_optical_frame (static, 10000 Hz)
+                                                        └── camera_depth_frame (static, 10000 Hz)
+                                                              └── camera_depth_optical_frame (static, 10000 Hz)
+
+Frame Details (YAML)
+====================
+base_link: 
+  parent: 'world'
+  broadcaster: 'default_authority'
+  rate: 10000.000
+camera_depth_frame: 
+  parent: 'camera_link'
+  broadcaster: 'default_authority'
+  rate: 10000.000
+camera_link: 
+  parent: 'camera_bottom_screw_frame'
+  broadcaster: 'default_authority'
+  rate: 10000.000
+camera_depth_optical_frame: 
+  parent: 'camera_depth_frame'
+  broadcaster: 'default_authority'
+  rate: 10000.000
+camera_color_frame: 
+  parent: 'camera_link'
+  broadcaster: 'default_authority'
+  rate: 10000.000
+camera_color_optical_frame: 
+  parent: 'camera_color_frame'
+  broadcaster: 'default_authority'
+  rate: 10000.000
+camera_bottom_screw_frame: 
+  parent: 'link6_1_1'
+  broadcaster: 'default_authority'
+  rate: 10000.000
+link6_1_1: 
+  parent: 'link5_1_1'
+  broadcaster: 'default_authority'
+  rate: 10.476
+link1_1_1: 
+  parent: 'base_link'
+  broadcaster: 'default_authority'
+  rate: 10.476
+link2_1_1: 
+  parent: 'link1_1_1'
+  broadcaster: 'default_authority'
+  rate: 10.476
+link3_1_1: 
+  parent: 'link2_1_1'
+  broadcaster: 'default_authority'
+  rate: 10.476
+link4_1_1: 
+  parent: 'link3_1_1'
+  broadcaster: 'default_authority'
+  rate: 10.476
+link5_1_1: 
+  parent: 'link4_1_1'
+  broadcaster: 'default_authority'
+  rate: 10.476

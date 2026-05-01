@@ -1,0 +1,19 @@
+digraph G {
+"world" -> "base_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_link" -> "camera_depth_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_bottom_screw_frame" -> "camera_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_depth_frame" -> "camera_depth_optical_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_link" -> "camera_color_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_color_frame" -> "camera_color_optical_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"link6_1_1" -> "camera_bottom_screw_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"link5_1_1" -> "link6_1_1"[label=" Broadcaster: default_authority\nAverage rate: 10.476\nBuffer length: 2.1\nMost recent transform: 1777453759.067227\nOldest transform: 1777453756.967158\n"];
+"base_link" -> "link1_1_1"[label=" Broadcaster: default_authority\nAverage rate: 10.476\nBuffer length: 2.1\nMost recent transform: 1777453759.067227\nOldest transform: 1777453756.967158\n"];
+"link1_1_1" -> "link2_1_1"[label=" Broadcaster: default_authority\nAverage rate: 10.476\nBuffer length: 2.1\nMost recent transform: 1777453759.067227\nOldest transform: 1777453756.967158\n"];
+"link2_1_1" -> "link3_1_1"[label=" Broadcaster: default_authority\nAverage rate: 10.476\nBuffer length: 2.1\nMost recent transform: 1777453759.067227\nOldest transform: 1777453756.967158\n"];
+"link3_1_1" -> "link4_1_1"[label=" Broadcaster: default_authority\nAverage rate: 10.476\nBuffer length: 2.1\nMost recent transform: 1777453759.067227\nOldest transform: 1777453756.967158\n"];
+"link4_1_1" -> "link5_1_1"[label=" Broadcaster: default_authority\nAverage rate: 10.476\nBuffer length: 2.1\nMost recent transform: 1777453759.067227\nOldest transform: 1777453756.967158\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1777453759.085282"[ shape=plaintext ] ;
+}->"world";
+}
