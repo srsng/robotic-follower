@@ -3,9 +3,6 @@
 from robotic_follower.util.log import log
 
 from .__base__ import Detector
-from .algo import AlgoDetector
-from .mmdet3d import Mmdet3dDetector
-from .seg_projection import SegProjectionDetector
 
 
 def create_from_config(
@@ -28,14 +25,36 @@ def create_from_config(
 
     match detector_type:
         case "mmdet3d":
+            from .mmdet3d import Mmdet3dDetector
+
             return Mmdet3dDetector.create_from_config(config, parent_node)
         case "algo":
+            from .algo import AlgoDetector
+
             return AlgoDetector.create_from_config(config, parent_node)
         case "seg_projection":
+            from .seg_projection import SegProjectionDetector
+
             return SegProjectionDetector.create_from_config(config, parent_node)
         case _:
             log("fatal", f"无效的 检测器type: {detector_type}", parent_node)
             return None
+
+
+def __getattr__(name: str):
+    if name == "AlgoDetector":
+        from .algo import AlgoDetector
+
+        return AlgoDetector
+    if name == "Mmdet3dDetector":
+        from .mmdet3d import Mmdet3dDetector
+
+        return Mmdet3dDetector
+    if name == "SegProjectionDetector":
+        from .seg_projection import SegProjectionDetector
+
+        return SegProjectionDetector
+    raise AttributeError(name)
 
 
 __all__ = [

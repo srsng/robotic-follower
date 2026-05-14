@@ -37,6 +37,7 @@ class SegmentAndProjectStage(RgbdProcessor):
             return data
 
         masks = data.object_masks
+        raw_masks = data.raw_object_masks
         scores = data.seg_scores
         labels = data.seg_labels
         depth_masks = data.depth_masks or [None] * len(masks)
@@ -46,11 +47,13 @@ class SegmentAndProjectStage(RgbdProcessor):
             person_mask = np.zeros((h, w), dtype=bool)
 
         detections: list[DetectionCandidate] = []
-        for mask, score, label, depth_mask in zip(
-            masks, scores, labels, depth_masks, strict=False
+        for idx, (mask, score, label, depth_mask) in enumerate(
+            zip(masks, scores, labels, depth_masks, strict=False)
         ):
+            raw_mask = raw_masks[idx] if idx < len(raw_masks) else None
             cand = self._build_detection_candidate(
                 mask=mask,
+                raw_mask=raw_mask,
                 person_mask=person_mask,
                 score=float(score),
                 label=str(label),
@@ -69,6 +72,7 @@ class SegmentAndProjectStage(RgbdProcessor):
     def _build_detection_candidate(
         self,
         mask: np.ndarray,
+        raw_mask: np.ndarray | None,
         person_mask: np.ndarray,
         score: float,
         label: str,
@@ -80,8 +84,12 @@ class SegmentAndProjectStage(RgbdProcessor):
     ) -> DetectionCandidate | None:
         if mask.dtype != bool:
             mask = mask.astype(bool)
+        if raw_mask is None:
+            raw_mask = mask
+        elif raw_mask.dtype != bool:
+            raw_mask = raw_mask.astype(bool)
 
-        raw_area = int(mask.sum())
+        raw_area = int(raw_mask.sum())
         cleaned = mask & (~person_mask)
         if cleaned.sum() == 0:
             return None

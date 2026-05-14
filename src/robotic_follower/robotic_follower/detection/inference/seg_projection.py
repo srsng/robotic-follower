@@ -67,7 +67,7 @@ class SegProjectionDetector(Detector):
         processors: list[RgbdProcessor] | None = None,
         postprocessors: list[RgbdPostProcessor] | None = None,
         detector_name: str | None = None,
-        parent_node: "rclpy.node.Node | None" = None,  # type: ignore  # noqa: F821
+        parent_node: rclpy.node.Node | None = None,  # type: ignore  # noqa: F821
     ):
         self.segmenter = segmenter
         self._cfg = config
@@ -77,12 +77,12 @@ class SegProjectionDetector(Detector):
         super().__init__(
             detector_type="seg_projection",
             detector_name=detector_name,
-            ignore_class_names=tuple([]),
+            ignore_class_names=(),
             parent_node=parent_node,
         )
 
     def _get_class_names(self) -> tuple[str]:
-        return tuple([])
+        return ()
 
     def detect(self, points: np.ndarray) -> list[dict]:
         raise NotImplementedError("Use detect_rgbd for seg_projection detector")
@@ -98,7 +98,7 @@ class SegProjectionDetector(Detector):
         debug: bool = False,
         debug_text: str | None = None,
         now_ns: int = 0,
-    ) -> "SegProjectionResult":
+    ) -> SegProjectionResult:
         data = PipelineData(
             rgb=rgb,
             depth_m=depth_m,
@@ -186,7 +186,7 @@ class SegProjectionDetector(Detector):
     def _config_check(
         cls,
         config: dict,
-        parent_node: "rclpy.node.Node" = None,  # type: ignore  # noqa: F821
+        parent_node: rclpy.node.Node = None,  # type: ignore  # noqa: F821
     ) -> bool:
         if "segmenter" not in config:
             log("fatal", "seg_projection 缺少 segmenter 配置", parent_node)
@@ -203,12 +203,76 @@ class SegProjectionDetector(Detector):
     ):
         super()._config_norm(config, parent_node=parent_node, defaults=defaults)
 
+    @staticmethod
+    def _default_pipeline_config(params: dict[str, object]) -> dict[str, list[dict]]:
+        return {
+            "preprocess": [
+                {
+                    "type": "mask_clean",
+                    "params": {
+                        "mask_area_min_px": int(params["mask_area_min_px"]),
+                        "mask_area_max_ratio": float(params["mask_area_max_ratio"]),
+                        "exclude_labels": list(params["exclude_labels"]),
+                    },
+                },
+                {
+                    "type": "mask_erode",
+                    "params": {
+                        "mask_erode_kernel": int(params["mask_erode_kernel"]),
+                        "mask_erode_iterations": int(params["mask_erode_iterations"]),
+                    },
+                },
+            ],
+            "process": [
+                {
+                    "type": "segment_and_project",
+                    "params": {
+                        "depth_valid_ratio_min": float(
+                            params["depth_valid_ratio_min"]
+                        ),
+                        "mask_aspect_ratio_max": float(
+                            params["mask_aspect_ratio_max"]
+                        ),
+                        "z_trim_quantile": float(params["z_trim_quantile"]),
+                        "max_non_person_distance_m": float(
+                            params["max_non_person_distance_m"]
+                        ),
+                        "occlusion_ratio_max_for_grasp": float(
+                            params["occlusion_ratio_max_for_grasp"]
+                        ),
+                    },
+                }
+            ],
+            "postprocess": [
+                {
+                    "type": "distance_gate",
+                    "params": {
+                        "max_non_person_distance_m": float(
+                            params["max_non_person_distance_m"]
+                        ),
+                    },
+                },
+                {
+                    "type": "detection_merge",
+                    "params": {
+                        "detection_merge_dist_m": float(
+                            params["detection_merge_dist_m"]
+                        ),
+                        "detection_merge_iou_min": float(
+                            params["detection_merge_iou_min"]
+                        ),
+                    },
+                },
+                {"type": "table_estimate", "params": {}},
+            ],
+        }
+
     @classmethod
     def create_from_config(
         cls: type[T],
         config: dict,
-        parent_node: "rclpy.node.Node | None" = None,  # type: ignore  # noqa: F821
-    ) -> "T | None":
+        parent_node: rclpy.node.Node | None = None,  # type: ignore  # noqa: F821
+    ) -> T | None:
         if not cls._config_check(config, parent_node):
             return None
 
@@ -242,7 +306,10 @@ class SegProjectionDetector(Detector):
             exclude_labels=list(merged_params["exclude_labels"]),
         )
 
-        pipeline_cfg = cfg.get("pipeline", {}) if isinstance(cfg, dict) else {}
+        pipeline_cfg = cfg.get("pipeline") if isinstance(cfg, dict) else None
+        if "pipeline" not in cfg or not isinstance(pipeline_cfg, dict):
+            pipeline_cfg = cls._default_pipeline_config(merged_params)
+
         preprocessors: list[RgbdPreProcessor] = []
         for step in (
             pipeline_cfg.get("preprocess", []) if isinstance(pipeline_cfg, dict) else []

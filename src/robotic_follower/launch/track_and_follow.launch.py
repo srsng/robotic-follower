@@ -5,7 +5,7 @@
 
 数据流：
     /perception/detections (3D检测结果)
-        → tracking_node 执行多目标追踪
+        → detect_track_node 执行多目标追踪
         → track_selector_node UI 选择目标
         → following_node 计算跟随点并驱动机械臂
 
@@ -19,9 +19,9 @@
     tracking_min_hits: 追踪最小命中次数，默认 3
 """
 
+from launch import LaunchDescription
 from launch_ros.actions import Node
 
-from launch import LaunchDescription
 from robotic_follower.util.launch import (
     declare_configurable_parameters,
     set_configurable_parameters,
@@ -56,24 +56,7 @@ def generate_launch_description():
     """生成全功能感知的 Launch 描述"""
     params = set_configurable_parameters(local_parameters)
 
-    # # 1. 3D 多目标追踪节点
-    # tracking_node = Node(
-    #     package="robotic_follower",
-    #     executable="tracking_node",
-    #     name="tracking_node",
-    #     output="screen",
-    #     parameters=[
-    #         {
-    #             "input_topic": "/perception/detections",
-    #             "output_topic": "/perception/tracked_objects",
-    #             "iou_threshold": params["tracking_iou_threshold"],
-    #             "max_age": params["tracking_max_age"],
-    #             "min_hits": params["tracking_min_hits"],
-    #         }
-    #     ],
-    # )
-
-    # 2. 目标选择器 UI 节点
+    # 1. 目标选择器 UI 节点
     track_selector_node = Node(
         package="robotic_follower",
         executable="track_selector_node",
@@ -86,7 +69,7 @@ def generate_launch_description():
         ],
     )
 
-    # 3. 目标跟随节点
+    # 2. 目标跟随节点
     following_node = Node(
         package="robotic_follower",
         executable="following_node",
@@ -108,7 +91,6 @@ def generate_launch_description():
             # 声明参数
             *declare_configurable_parameters(local_parameters),
             # 启动节点
-            # tracking_node,
             track_selector_node,
             following_node,
         ]

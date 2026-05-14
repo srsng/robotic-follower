@@ -1,51 +1,58 @@
-detector:
-  name: fastsam_seg_projection
-  type: seg_projection
-  segmenter:
-    type: fastsam
-    model_path: FastSAM-s.pt
-    conf_threshold: 0.25
-    iou_threshold: 0.45
-    min_mask_area_px: 400
-    fallback_open_kernel: 5
-    fallback_open_iterations: 1
-    person_model_path: yolov8n-seg.pt
-  params:
+perception:
+  name: fastsam_rgbd_track
+  global:
     depth_valid_ratio_min: 0.6
     mask_area_min_px: 400
+    mask_area_max_ratio: 0.40
+    mask_aspect_ratio_max: 6.0
+    mask_erode_kernel: 3
+    mask_erode_iterations: 1
     z_trim_quantile: 0.05
-    detection_merge_dist_m: 0.06
-    detection_merge_iou_min: 0.48
     max_non_person_distance_m: 1.2
     occlusion_ratio_max_for_grasp: 0.45
-  pipeline:
-    preprocess:
+    detection_merge_dist_m: 0.06
+    detection_merge_iou_min: 0.48
+
+  detector:
+    pre:
+      - type: segment
+        segmenter:
+          type: fastsam
+          model_path: FastSAM-s.pt
+          conf_threshold: 0.25
+          iou_threshold: 0.45
+          min_mask_area_px: 400
+          fallback_open_kernel: 5
+          fallback_open_iterations: 1
+          person_model_path: yolov8n-seg.pt
       - type: mask_clean
         params:
-          mask_area_min_px: 400
-          mask_area_max_ratio: 0.40
+          mask_area_min_px: ${mask_area_min_px}
+          mask_area_max_ratio: ${mask_area_max_ratio}
           exclude_labels:
             - dining table
       - type: mask_erode
         params:
-          mask_erode_kernel: 3
-          mask_erode_iterations: 1
+          mask_erode_kernel: ${mask_erode_kernel}
+          mask_erode_iterations: ${mask_erode_iterations}
+
     process:
       - type: segment_and_project
         params:
-          depth_valid_ratio_min: 0.6
-          mask_aspect_ratio_max: 6.0
-          z_trim_quantile: 0.05
-          max_non_person_distance_m: 1.2
-          occlusion_ratio_max_for_grasp: 0.45
-    postprocess:
+          depth_valid_ratio_min: ${depth_valid_ratio_min}
+          mask_aspect_ratio_max: ${mask_aspect_ratio_max}
+          z_trim_quantile: ${z_trim_quantile}
+          max_non_person_distance_m: ${max_non_person_distance_m}
+          occlusion_ratio_max_for_grasp: ${occlusion_ratio_max_for_grasp}
+
+    post:
       - type: distance_gate
         params:
-          max_non_person_distance_m: 1.2
+          max_non_person_distance_m: ${max_non_person_distance_m}
       - type: detection_merge
         params:
-          detection_merge_dist_m: 0.06
-          detection_merge_iou_min: 0.48
+          detection_merge_dist_m: ${detection_merge_dist_m}
+          detection_merge_iou_min: ${detection_merge_iou_min}
       - type: table_estimate
         params:
           table_z: 0.0
@@ -53,18 +60,12 @@ detector:
           table_reestimate_interval_s: 2.0
           table_reestimate_min_inlier_ratio: 0.35
 
-tracker:
-  type: kalman3d
-  params:
-    association_dist_gate_m: 0.08
-    duplicate_track_dist_m: 0.04
-    max_age: 8
-    min_hits: 3
-
-node:
-  params:
-    tf_stale_threshold_ms: 80
-    sync_skew_threshold_ms: 30
-    tf_fallback_warn_every: 45
-    sync_warn_every: 45
-    fallback_to_source_frame_when_tf_disconnected: true
+  tracker:
+    enabled: true
+    process:
+      - type: kalman3d
+        params:
+          association_dist_gate_m: 0.08
+          duplicate_track_dist_m: 0.04
+          max_age: 8
+          min_hits: 3

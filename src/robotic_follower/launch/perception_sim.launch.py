@@ -3,7 +3,7 @@
 
 使用模拟相机数据进行感知测试：
 1. 模拟相机节点（从 .bin 文件发布数据）
-2. 3D 检测器
+2. 统一感知节点
 3. 可视化 (可选 Open3D 或 RViz)
 
 使用场景：
@@ -22,6 +22,7 @@
 import os
 
 from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
 from launch.actions import (
     IncludeLaunchDescription,
     OpaqueFunction,
@@ -30,7 +31,6 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
-from launch import LaunchDescription
 from robotic_follower.util.launch import (
     declare_configurable_parameters,
     set_configurable_parameters,
@@ -135,16 +135,17 @@ def generate_launch_description():
         arguments=[camera_urdf],
     )
 
-    # 3. 3D 检测器
-    detection_node = Node(
+    # 3. 统一点云检测节点
+    detect_track_node = Node(
         package="robotic_follower",
-        executable="detection_node",
-        name="detection_node",
+        executable="detect_track_node",
+        name="detect_track_node",
         output="screen",
         parameters=[
             {
+                "input_mode": "pointcloud",
+                "config_file": "model/config/ground_cluster.yaml",
                 "pointcloud_topic": "/camera/camera/depth/color/points",
-                "source_frame": "camera_depth_optical_frame",
                 "target_frame": "camera_depth_optical_frame",
             }
         ],
@@ -158,7 +159,7 @@ def generate_launch_description():
             *declare_configurable_parameters(local_parameters),
             camera_sim_node,
             robot_state_publisher_node,
-            detection_node,
+            detect_track_node,
             visualizer_node,
         ]
     )

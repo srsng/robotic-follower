@@ -1,68 +1,47 @@
-# 感知系统配置文件 - 地面物体聚簇检测
+perception:
+  name: ground_cluster
+  global:
+    max_distance: 1.4
+    ground_percentile: 0.02
+    ground_threshold_percent: 0.15
 
-detector:
-  name: ground_cluster_detector
-  type: algo
+  detector:
+    pre:
+      - type: radius_filter
+        enabled: true
+        params:
+          max_distance: ${max_distance}
+          min_distance: 0.1
+      - type: height_filter
+        enabled: false
+        params:
+          threshold: 0.047
+          mode: absolute
+      - type: voxel_filter
+        enabled: true
+        params:
+          leaf_size: 0.01
+      - type: statistical_outlier_removal
+        enabled: true
+        params:
+          k_neighbors: 30
+          std_multiplier: 5.1
+      - type: ground_estimation
+        enabled: false
+        params:
+          percentile: ${ground_percentile}
 
-  # 全局参数
-  global_params:
-    max_distance: 1.4 # 点云滤波距离 (m)
-    ground_percentile: 0.02 # 地面高度计算：最低 2% 的点，更鲁棒
-    ground_threshold_percent: 0.15 # 地面阈值 = (z_max - z_min) * 0.15，加厚地面带以彻底移除地面噪声
+    process:
+      - type: dbscan_cluster
+        params:
+          eps: 0.10
+          min_samples: 70
 
-  # 预处理阶段
-  pre_process:
-    - type: radius_filter
-      enabled: true
-      params:
-        max_distance: ${max_distance}
-        min_distance: 0.1
+    post:
+      - type: compute_bbox
+      - type: merge_overlapping
+        params:
+          iou_threshold: 0.2
 
-    # 高度直通滤波：直接移除 Z 低于阈值的点（地面）
-    # 在 ground_estimation 之前执行，先粗略去掉地面
-    # 阈值需根据实际场景调试，以下是占位值
-    - type: height_filter
-      enabled: false
-      params:
-        threshold: 0.047 # absolute 模式: Z < threshold 的点被移除。相机坐标系中 Z 朝前（深度），需要看日志调整
-        mode: absolute # "absolute" 或 "relative"
-
-    # 体素滤波
-    - type: voxel_filter
-      enabled: true
-      params:
-        leaf_size: 0.01 # 体素大小 (m)
-
-    # 统计滤波
-    - type: statistical_outlier_removal
-      enabled: true
-      params:
-        k_neighbors: 30 # 用于计算距离统计的邻域点数
-        std_multiplier: 5.1 # 容忍度
-
-    - type: ground_estimation
-      enabled: false
-      params:
-        percentile: ${ground_percentile}
-
-  # 算法阶段
-  algorithm:
-    # 地面检测
-    # - type: ground_detector
-    #   params:
-    #     threshold_percent: ${ground_threshold_percent}
-    #     percentile: ${ground_percentile}
-
-    # DBSCAN 聚簇（按密度聚类）
-    - type: dbscan_cluster
-      params:
-        eps: 0.10 # 邻域半径 (m) , 物体内点云连接距离
-        min_samples: 70 # 最小样本数
-
-  # 后处理阶段
-  post_process:
-    - type: compute_bbox
-    # 合并重叠或距离过近的簇，减少碎片化
-    - type: merge_overlapping
-      params:
-        iou_threshold: 0.2
+  tracker:
+    enabled: false

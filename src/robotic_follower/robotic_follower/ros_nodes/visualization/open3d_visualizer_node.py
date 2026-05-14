@@ -53,7 +53,7 @@ from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from std_msgs.msg import String
 from vision_msgs.msg import Detection3DArray
 
-from robotic_follower.point_cloud.io.ros_converters import pointcloud2_to_numpy
+from robotic_follower.util.ros_pointcloud import pointcloud2_to_numpy
 from robotic_follower.util.wrapper import NodeWrapper
 
 
@@ -288,7 +288,6 @@ def main(args=None):
             dets = list(node.current_detections)
             rgb = node.current_rgb_image
             depth = node.current_depth_image
-            cam_info = node.current_camera_info
             class_names = list(node.class_names)
             class_names_received = node._class_names_received
 

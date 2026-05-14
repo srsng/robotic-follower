@@ -3,14 +3,14 @@
 
 启动完整的感知流水线用于实机测试：
 1. RealSense D435i 相机（原生点云 + TF 模型发布）
-2. 3D 检测器（消费 realsense 原生点云）
-3. RViz 可视化（点云 + 检测包围盒）
+2. 统一感知节点（实例分割 + 深度投影 + 3D 追踪）
+3. RViz 可视化（点云 + 检测/追踪包围盒）
 
 架构说明：
-    realsense2_camera 发布点云 /camera/camera/depth/color/points
-    → detection_node 订阅，执行 3D 检测
-    → rviz_visualizer_node 转为 MarkerArray
-    → RViz 显示点云、目标包围盒等可视化
+    realsense2_camera 发布 RGB / Depth / CameraInfo
+    → detect_track_node 同步输入，执行检测和追踪
+    → rviz_visualizer_node 转发调试图像和可视化消息
+    → RViz 显示点云、目标包围盒、分割调试图等可视化
 
 TF 说明：
     robot_state_publisher 发布机械臂 TF：world → base_link →  link1_1_1 → ... → link6_1_1 → camera_link
@@ -25,17 +25,16 @@ TF 说明：
 import os
 
 from ament_index_python import get_package_share_directory
+from launch import LaunchDescription
 from launch.actions import (
     ExecuteProcess,
     IncludeLaunchDescription,
 )
-from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
-from launch import LaunchDescription
 from robotic_follower.util.launch import (
     declare_configurable_parameters,
     set_configurable_parameters,
@@ -49,15 +48,10 @@ local_parameters = [
         "description": "Name of the handeye calibration",
     },
     {
-        "name": "use_fused_rgbd_pipeline",
-        "default": "true",
-        "description": "Use fused RGBD detect+track node",
-    },
-    {
-        "name": "fused_config_file",
+        "name": "perception_config_file",
         "default": "model/config/yolov8_seg_rgbd_track.yaml",
         # "default": "model/config/fastsam_rgbd_track.yaml",
-        "description": "Config file for fused RGBD node",
+        "description": "Config file for unified perception node",
     },
 ]
 
@@ -88,32 +82,17 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 2. 3D 检测器（旧链路）  TODO: 重构
-    detection_node = Node(
+    # 2. 统一 RGBD 检测追踪节点
+    detect_track_node = Node(
         package="robotic_follower",
-        executable="detection_node",
-        name="detection_node",
+        executable="detect_track_node",
+        name="detect_track_node",
         output="screen",
-        condition=UnlessCondition(params["use_fused_rgbd_pipeline"]),
         parameters=[
             {
-                "pointcloud_topic": "/camera/camera/depth/color/points",
+                "input_mode": "rgbd",
                 "target_frame": "base_link",
-            }
-        ],
-    )
-
-    # 2b. 融合 RGBD 检测追踪节点（新链路）
-    fused_node = Node(
-        package="robotic_follower",
-        executable="rgbd_detect_track_node",
-        name="rgbd_detect_track_node",
-        output="screen",
-        condition=IfCondition(params["use_fused_rgbd_pipeline"]),
-        parameters=[
-            {
-                "target_frame": "base_link",
-                "config_file": params["fused_config_file"],
+                "config_file": params["perception_config_file"],
                 "fallback_to_source_frame_when_tf_disconnected": False,
             }
         ],
@@ -148,8 +127,7 @@ def generate_launch_description():
             *declare_configurable_parameters(local_parameters),
             # 启动节点
             realsense_launch,
-            detection_node,
-            fused_node,
+            detect_track_node,
             rviz_visualizer_node,
             rviz_node,
         ]

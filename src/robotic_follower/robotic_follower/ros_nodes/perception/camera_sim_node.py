@@ -33,7 +33,7 @@
     ros2 run robotic_follower camera_sim_node --ros-args -p bin_file:=/path/to/data.bin
 
 注意：
-    3D 检测由独立的 detection_node 处理，请确保启动 detection_node 来获取检测结果。
+    3D 检测由统一的 detect_track_node 处理，请确保启动 detect_track_node 来获取检测结果。
 """
 
 import os
@@ -42,9 +42,9 @@ import rclpy
 from cv_bridge import CvBridge
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
-from robotic_follower.point_cloud.io.projection import colorize_pointcloud
-from robotic_follower.point_cloud.io.ros_converters import numpy_to_pointcloud2
+from robotic_follower.detection.pipeline.impl.pointcloud_ops import colorize_pointcloud
 from robotic_follower.point_cloud.io.sunrgbd_io import load_sunrgbd_data
+from robotic_follower.util.ros_pointcloud import numpy_to_pointcloud2
 from robotic_follower.util.wrapper import NodeWrapper
 
 

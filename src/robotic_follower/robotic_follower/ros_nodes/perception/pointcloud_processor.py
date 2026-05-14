@@ -44,12 +44,13 @@ import rclpy
 from cv_bridge import CvBridge
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
-from robotic_follower.point_cloud.filters.filters import create_default_filter_pipeline
-from robotic_follower.point_cloud.io.converters import (
+from robotic_follower.detection.pipeline.impl.pointcloud_ops import (
+    colorize_pointcloud,
+    create_default_filter_pipeline,
     depth_to_pointcloud,
     extract_camera_intrinsics_from_msg,
 )
-from robotic_follower.point_cloud.io.ros_converters import numpy_to_pointcloud2
+from robotic_follower.util.ros_pointcloud import numpy_to_pointcloud2
 from robotic_follower.util.wrapper import NodeWrapper
 
 
@@ -147,10 +148,6 @@ class PointCloudProcessorNode(NodeWrapper):
 
             # 点云染色（如果有 RGB 图像）
             if self.enable_color and self.rgb_image is not None:
-                from robotic_follower.point_cloud.io.projection import (
-                    colorize_pointcloud,
-                )
-
                 # 构建 3x3 内参矩阵 K（从字典转换为 numpy 数组）
                 fx = self.camera_intrinsics["fx"]
                 fy = self.camera_intrinsics["fy"]
@@ -158,7 +155,7 @@ class PointCloudProcessorNode(NodeWrapper):
                 cy = self.camera_intrinsics["cy"]
                 K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
 
-                colored = colorize_pointcloud(
+                filtered_points = colorize_pointcloud(
                     filtered_points[:, :3], self.rgb_image, None, K
                 )
 

@@ -33,9 +33,11 @@ class PipelineData:
         is_stale: 是否使用了过期的 TF
         seg_result: 分割器原始输出
         person_mask: 人体掩码
+        raw_object_masks: 分割器原始目标掩码列表
         object_masks: 目标掩码列表
         seg_scores: 分割置信度
         seg_labels: 分割标签
+        seg_track_ids: 分割器输出的 2D 跟踪 ID
         cleaned_masks: 清洗后的掩码列表
         depth_masks: 腐蚀后的掩码列表
         detection_candidates: RGBD 检测候选
@@ -59,9 +61,11 @@ class PipelineData:
     is_stale: bool = False
     seg_result: dict | None = None
     person_mask: np.ndarray | None = None
+    raw_object_masks: list[np.ndarray] = field(default_factory=list)
     object_masks: list[np.ndarray] = field(default_factory=list)
     seg_scores: list[float] = field(default_factory=list)
     seg_labels: list[str] = field(default_factory=list)
+    seg_track_ids: list[int | None] = field(default_factory=list)
     cleaned_masks: list[np.ndarray] = field(default_factory=list)
     depth_masks: list[np.ndarray] = field(default_factory=list)
     detection_candidates: list[DetectionCandidate] = field(default_factory=list)
