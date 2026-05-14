@@ -5,6 +5,8 @@ from typing import Any
 
 import numpy as np
 
+from robotic_follower.detection.data import DetectionCandidate
+
 
 @dataclass
 class PipelineData:
@@ -23,6 +25,21 @@ class PipelineData:
             - point_indices: 构成该目标的点索引
         metadata: 元数据字典（如地面高度等）
         context: 共享上下文字典
+
+        rgb: 彩色图 (H, W, 3), BGR
+        depth_m: 深度图 (H, W), float32 米
+        camera_k: 相机内参 (fx, fy, cx, cy)
+        t_mat: 4x4 变换矩阵
+        is_stale: 是否使用了过期的 TF
+        seg_result: 分割器原始输出
+        person_mask: 人体掩码
+        object_masks: 目标掩码列表
+        seg_scores: 分割置信度
+        seg_labels: 分割标签
+        cleaned_masks: 清洗后的掩码列表
+        depth_masks: 腐蚀后的掩码列表
+        detection_candidates: RGBD 检测候选
+        debug_overlay: 调试可视化图像
     """
 
     points: np.ndarray = field(default_factory=lambda: np.empty((0, 3)))
@@ -34,6 +51,21 @@ class PipelineData:
     detections: list[dict] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     context: dict[str, Any] = field(default_factory=dict)
+
+    rgb: np.ndarray | None = None
+    depth_m: np.ndarray | None = None
+    camera_k: tuple[float, float, float, float] | None = None
+    t_mat: np.ndarray | None = None
+    is_stale: bool = False
+    seg_result: dict | None = None
+    person_mask: np.ndarray | None = None
+    object_masks: list[np.ndarray] = field(default_factory=list)
+    seg_scores: list[float] = field(default_factory=list)
+    seg_labels: list[str] = field(default_factory=list)
+    cleaned_masks: list[np.ndarray] = field(default_factory=list)
+    depth_masks: list[np.ndarray] = field(default_factory=list)
+    detection_candidates: list[DetectionCandidate] = field(default_factory=list)
+    debug_overlay: np.ndarray | None = None
 
     def reset(self) -> None:
         """重置检测结果，保留点云和上下文"""

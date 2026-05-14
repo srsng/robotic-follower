@@ -4,6 +4,13 @@
 from . import impl  # noqa: F401
 from .data import PipelineData
 from .registry import StageRegistry
+from .rgbd_registry import RgbdStageRegistry
+from .rgbd_stages import (
+    RgbdPipelineStage,
+    RgbdPostProcessor,
+    RgbdPreProcessor,
+    RgbdProcessor,
+)
 from .stages import AlgorithmStage, PipelineStage, PostProcessor, PreProcessor
 
 
@@ -14,4 +21,9 @@ __all__ = [
     "AlgorithmStage",
     "PostProcessor",
     "StageRegistry",
+    "RgbdPipelineStage",
+    "RgbdPreProcessor",
+    "RgbdProcessor",
+    "RgbdPostProcessor",
+    "RgbdStageRegistry",
 ]

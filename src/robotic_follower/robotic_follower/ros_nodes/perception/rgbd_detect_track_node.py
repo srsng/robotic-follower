@@ -5,10 +5,8 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
-import cv2
 import message_filters
 import numpy as np
 import rclpy
@@ -22,19 +20,11 @@ from sensor_msgs.msg import CameraInfo, Image
 from tf2_ros import Buffer, TransformListener
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 
-from robotic_follower.segmentation import create_segmenter_from_config
+from robotic_follower.detection.data import DetectionCandidate
+from robotic_follower.detection.inference.seg_projection import SegProjectionDetector
 from robotic_follower.tracking.kalman_tracker_3d import KalmanTracker3D
 from robotic_follower.util.perf import PerfTimer
 from robotic_follower.util.wrapper import NodeWrapper
-
-
-@dataclass
-class DetectionCandidate:
-    bbox: list[float]
-    score: float
-    label: str
-    occlusion_ratio: float
-    graspable: bool
 
 
 class RgbdDetectTrackNode(NodeWrapper):
@@ -45,32 +35,11 @@ class RgbdDetectTrackNode(NodeWrapper):
 
         self._param_defaults: dict[str, object] = {
             "target_frame": "base_link",
-            "depth_valid_ratio_min": 0.35,
-            "mask_area_min_px": 200,
-            "mask_area_max_ratio": 0.40,
-            "mask_aspect_ratio_max": 6.0,
-            "mask_erode_kernel": 3,
-            "mask_erode_iterations": 1,
-            "z_trim_quantile": 0.08,
-            "table_margin_m": 0.01,
-            "table_z": 0.0,
-            "table_reestimate_interval_s": 2.0,
-            "table_reestimate_min_inlier_ratio": 0.35,
             "tf_stale_threshold_ms": 80.0,
             "sync_skew_threshold_ms": 30.0,
             "tf_fallback_warn_every": 45,
-            "table_warn_every": 45,
             "sync_warn_every": 45,
-            "association_dist_gate_m": 0.50,
-            "detection_merge_dist_m": 0.10,
-            "detection_merge_iou_min": 0.18,
-            "duplicate_track_dist_m": 0.15,
-            "max_age": 30,
-            "min_hits": 1,
-            "occlusion_ratio_max_for_grasp": 0.45,
-            "max_non_person_distance_m": 1.2,
             "fallback_to_source_frame_when_tf_disconnected": True,
-            "exclude_labels": ["dining table"],
         }
 
         self.bridge = CvBridge()
@@ -80,36 +49,6 @@ class RgbdDetectTrackNode(NodeWrapper):
         self.target_frame = self.declare_and_get_parameter("target_frame", "base_link")
         self.base_frame = self.target_frame
 
-        self.depth_valid_ratio_min = self.declare_and_get_parameter(
-            "depth_valid_ratio_min", 0.35
-        )
-
-        self.mask_area_min_px = self.declare_and_get_parameter("mask_area_min_px", 200)
-        self.mask_area_max_ratio = self.declare_and_get_parameter(
-            "mask_area_max_ratio", 0.40
-        )
-
-        self.mask_aspect_ratio_max = self.declare_and_get_parameter(
-            "mask_aspect_ratio_max", 6.0
-        )
-
-        self.mask_erode_kernel = self.declare_and_get_parameter("mask_erode_kernel", 3)
-        self.mask_erode_iterations = self.declare_and_get_parameter(
-            "mask_erode_iterations", 1
-        )
-        self._erode_kernel = np.ones(
-            (self.mask_erode_kernel, self.mask_erode_kernel), dtype=np.uint8
-        )
-
-        self.z_trim_quantile = self.declare_and_get_parameter("z_trim_quantile", 0.08)
-        self.table_margin_m = self.declare_and_get_parameter("table_margin_m", 0.01)
-        self.table_z = self.declare_and_get_parameter("table_z", 0.0)
-        self.table_reestimate_interval_s = self.declare_and_get_parameter(
-            "table_reestimate_interval_s", 2.0
-        )
-        self.table_reestimate_min_inlier_ratio = self.declare_and_get_parameter(
-            "table_reestimate_min_inlier_ratio", 0.35
-        )
         self.tf_stale_threshold_ms = self.declare_and_get_parameter(
             "tf_stale_threshold_ms", 80.0
         )
@@ -119,45 +58,17 @@ class RgbdDetectTrackNode(NodeWrapper):
         self.tf_fallback_warn_every = self.declare_and_get_parameter(
             "tf_fallback_warn_every", 45
         )
-        self.table_warn_every = self.declare_and_get_parameter("table_warn_every", 45)
         self.sync_warn_every = self.declare_and_get_parameter("sync_warn_every", 45)
-        self.association_dist_gate_m = self.declare_and_get_parameter(
-            "association_dist_gate_m", 0.50
-        )
-        self.detection_merge_dist_m = self.declare_and_get_parameter(
-            "detection_merge_dist_m", 0.10
-        )
-        self.detection_merge_iou_min = self.declare_and_get_parameter(
-            "detection_merge_iou_min", 0.18
-        )
-        self.duplicate_track_dist_m = self.declare_and_get_parameter(
-            "duplicate_track_dist_m", 0.15
-        )
-        self.max_age = self.declare_and_get_parameter("max_age", 30)
-        self.min_hits = self.declare_and_get_parameter("min_hits", 1)
-        self.occlusion_ratio_max_for_grasp = self.declare_and_get_parameter(
-            "occlusion_ratio_max_for_grasp", 0.45
-        )
-        self.max_non_person_distance_m = self.declare_and_get_parameter(
-            "max_non_person_distance_m", 1.2
-        )
         self.fallback_to_source_frame_when_tf_disconnected = bool(
             self.declare_and_get_parameter(
                 "fallback_to_source_frame_when_tf_disconnected", True
             )
         )
-        self.exclude_labels: list[str] = list(
-            self.declare_and_get_parameter(
-                "exclude_labels", ["dining table"], list[str]
-            )
-        )
-
         self.tf_lookup_fail_count = 0
         self.last_tf_age_ms = 0.0
         self.last_sync_skew_ms = 0.0
         self.last_stamp_ns: int | None = None
         self._prev_stamp_ns: int | None = None
-        self.last_table_reestimate_ns = 0
         self._warn_counters: dict[str, int] = {}
         self._current_output_frame = self.base_frame
         self._perf_frame_id = 0
@@ -175,18 +86,43 @@ class RgbdDetectTrackNode(NodeWrapper):
             "config_file", "model/config/yolov8_seg_rgbd_track.yaml"
         )
         config = self._load_config(config_file)
-        cfg_params = config.get("params", {}) if isinstance(config, dict) else {}
-        self._apply_config_params(cfg_params)
+        if not isinstance(config, dict):
+            config = {}
 
-        segmenter_cfg = config.get("segmenter", {"type": "yolov8_seg"})
-        self.segmenter = create_segmenter_from_config(segmenter_cfg, parent_node=self)
+        detector_cfg = config.get("detector", {})
+        tracker_cfg = config.get("tracker", {})
+        node_cfg = config.get("node", {})
 
+        node_params = node_cfg.get("params", {}) if isinstance(node_cfg, dict) else {}
+
+        self._apply_config_params(node_params)
+
+        detector_cfg = detector_cfg if isinstance(detector_cfg, dict) else {}
+        detector_cfg = detector_cfg.copy()
+        detector_cfg.setdefault("type", "seg_projection")
+        detector_cfg.setdefault("segmenter", {"type": "yolov8_seg"})
+        self.detector = SegProjectionDetector.create_from_config(
+            detector_cfg, parent_node=self
+        )
+
+        tracker_type = (
+            tracker_cfg.get("type", "kalman3d")
+            if isinstance(tracker_cfg, dict)
+            else "kalman3d"
+        )
+        if tracker_type != "kalman3d":
+            self._warn(f"未知 tracker type: {tracker_type}, 回退到 kalman3d")
+        tracker_params = tracker_cfg.get("params", {}) if isinstance(tracker_cfg, dict) else {}
+        self.association_dist_gate_m = float(
+            tracker_params.get("association_dist_gate_m", 0.50)
+        )
         self.tracker = KalmanTracker3D(
             dist_gate_m=self.association_dist_gate_m,
-            max_age=self.max_age,
-            min_hits=self.min_hits,
-            duplicate_track_dist_m=self.duplicate_track_dist_m,
+            max_age=int(tracker_params.get("max_age", 30)),
+            min_hits=int(tracker_params.get("min_hits", 1)),
+            duplicate_track_dist_m=float(tracker_params.get("duplicate_track_dist_m", 0.15)),
         )
+        self.table_z: float = float(node_params.get("table_z", 0.0))
         self.track_quality: dict[int, dict] = {}
 
         rgb_topic = self.declare_and_get_parameter(
@@ -352,81 +288,65 @@ class RgbdDetectTrackNode(NodeWrapper):
                 )
                 return
 
-            t_seg_start = time.monotonic()
-            seg = self.segmenter.segment_and_track(rgb)
-            t_seg = time.monotonic() - t_seg_start
-            perf.record_value("segmentation", t_seg)
-            person_mask = seg["person_mask"]
+            if self.detector is None or not self.detector.ready:
+                self._warn("seg_projection detector 未就绪，跳过本帧")
+                return
 
+            t_seg_start = time.monotonic()
             t_preprocess_start = time.monotonic()
             t_mask_proc_start = perf.mark("mask_proc_start")
-            detections: list[DetectionCandidate] = []
-            debug_raw_masks: list[np.ndarray] = []
-            debug_cleaned_masks: list[np.ndarray] = []
-            debug_depth_masks: list[np.ndarray] = []
             collect_debug = self.enable_segmentation_debug_vis
-            for mask, score, label in zip(
-                seg["object_masks"], seg["scores"], seg["labels"], strict=False
-            ):
-                if label in self.exclude_labels:
-                    continue
-                raw_mask = mask if mask.dtype == bool else mask.astype(bool)
-                cleaned = self._compute_cleaned_mask(raw_mask, person_mask)
-                depth_m = None
-                if cleaned is not None:
-                    depth_m = self._erode_mask(cleaned)
-                    if depth_m.sum() < 20:
-                        depth_m = cleaned
-
-                if collect_debug:
-                    debug_raw_masks.append(raw_mask)
-                    if cleaned is None:
-                        debug_cleaned_masks.append(np.zeros_like(raw_mask, dtype=bool))
-                        debug_depth_masks.append(np.zeros_like(raw_mask, dtype=bool))
-                    else:
-                        debug_cleaned_masks.append(cleaned)
-                        debug_depth_masks.append(depth_m if depth_m is not None else np.zeros_like(raw_mask, dtype=bool))
-
-                cand = self._build_detection_candidate(
-                    mask=raw_mask,
-                    person_mask=person_mask,
-                    score=score,
-                    label=label,
-                    depth=depth,
-                    info_msg=info_msg,
-                    t_mat=t_mat,
-                    is_stale=is_stale,
-                    cleaned_mask=cleaned,
-                    depth_mask=depth_m,
+            if collect_debug:
+                self._debug_vis_counter += 1
+                do_debug = (
+                    self._debug_vis_counter
+                    % max(1, self.segmentation_debug_vis_interval)
+                    == 0
                 )
-                if cand is not None:
-                    detections.append(cand)
+            else:
+                do_debug = False
+            debug_text = (
+                f"tf_age={self.last_tf_age_ms:.1f}ms "
+                f"skew={self.last_sync_skew_ms:.1f}ms"
+            )
+            det_result = self.detector.detect_rgbd(
+                rgb=rgb,
+                depth_m=depth,
+                camera_k=(
+                    float(info_msg.k[0]),
+                    float(info_msg.k[4]),
+                    float(info_msg.k[2]),
+                    float(info_msg.k[5]),
+                ),
+                t_mat=t_mat,
+                is_stale=is_stale,
+                debug=do_debug,
+                debug_text=debug_text,
+                now_ns=current_stamp_ns,
+            )
             perf.record("mask_proc", t_mask_proc_start)
 
-            t_merge_start = perf.mark("det_merge_start")
-            detections = self._merge_detection_candidates(detections)
-            perf.record("det_merge", t_merge_start)
+            t_seg = time.monotonic() - t_seg_start
+            perf.record_value("segmentation", t_seg)
+
+            detections: list[DetectionCandidate] = det_result.detections
+
             t_preprocess = time.monotonic() - t_preprocess_start
             perf.record_value("preprocess", t_preprocess)
 
-            if collect_debug:
-                self._debug_vis_counter += 1
-                if self._debug_vis_counter % max(1, self.segmentation_debug_vis_interval) == 0:
-                    t_debug_vis_start = perf.mark("debug_vis_start")
-                    self._publish_segmentation_debug(
-                        header=rgb_msg.header,
-                        rgb=rgb,
-                        person_mask=person_mask,
-                        cleaned_masks=debug_cleaned_masks,
-                        accepted_count=len(detections),
-                    )
-                    perf.record("debug_vis", t_debug_vis_start)
-
             self._log(
                 "debug",
-                f"t_seg={t_seg:.6f} t_preprocess={t_preprocess:.6f} n_raw={len(seg['object_masks'])} n_accepted={len(detections)}",
+                f"t_seg={t_seg:.6f} t_preprocess={t_preprocess:.6f} n_raw={det_result.raw_count} n_accepted={len(detections)}",
                 channel="detection",
             )
+
+            if do_debug and det_result.debug_overlay is not None:
+                t_debug_vis_start = perf.mark("debug_vis_start")
+                self._publish_segmentation_debug(
+                    header=rgb_msg.header,
+                    overlay=det_result.debug_overlay,
+                )
+                perf.record("debug_vis", t_debug_vis_start)
 
             t_pub_det_start = perf.mark("publish_detections_start")
             self._publish_raw_detections(detections, rgb_msg.header)
@@ -450,22 +370,17 @@ class RgbdDetectTrackNode(NodeWrapper):
             perf.record("quality_update", t_quality_update_start)
             t_track_total = time.monotonic() - t0
             perf.record_value("total", t_track_total)
-            self._log(
-                "debug",
-                f"t_seg={t_seg:.6f} t_preprocess={t_preprocess:.6f} n_raw={len(seg['object_masks'])} n_accepted={len(detections)}",
-                channel="detection",
-            )
             t_pub_tracks_start = perf.mark("publish_tracks_start")
             self._publish_tracks(tracked, rgb_msg.header, is_stale=is_stale)
             perf.record("publish_tracks", t_pub_tracks_start)
 
             t_table_start = perf.mark("table_est_start")
-            self._maybe_reestimate_table(depth, info_msg, t_mat)
+            self._update_table_from_pipeline(det_result)
             perf.record("table_est", t_table_start)
             perf.flush(
                 extra={
                     "frame_id": self._perf_frame_id,
-                    "n_raw": len(seg["object_masks"]),
+                    "n_raw": det_result.raw_count,
                     "n_accepted": len(detections),
                     "n_tracked": len(tracked),
                     "tf_age_ms": self.last_tf_age_ms,
@@ -573,355 +488,15 @@ class RgbdDetectTrackNode(NodeWrapper):
         depth = self.bridge.imgmsg_to_cv2(depth_msg)
         return depth.astype(np.float32)
 
-    def _build_detection_candidate(
-        self,
-        mask: np.ndarray,
-        person_mask: np.ndarray,
-        score: float,
-        label: str,
-        depth: np.ndarray,
-        info_msg: CameraInfo,
-        t_mat: np.ndarray,
-        is_stale: bool,
-        cleaned_mask: np.ndarray | None = None,
-        depth_mask: np.ndarray | None = None,
-    ) -> DetectionCandidate | None:
-        if mask.dtype != bool:
-            mask = mask.astype(bool)
-
-        raw_area = int(mask.sum())
-        if cleaned_mask is not None:
-            cleaned = cleaned_mask
-        else:
-            cleaned = self._compute_cleaned_mask(mask, person_mask)
-        if cleaned is None:
-            return None
-
-        if depth_mask is None:
-            depth_mask = self._erode_mask(cleaned)
-        if depth_mask.sum() < 20:
-            depth_mask = cleaned
-
-        ys, xs = np.where(cleaned)
-        if len(xs) == 0:
-            return None
-        width = float(xs.max() - xs.min() + 1)
-        height = float(ys.max() - ys.min() + 1)
-        aspect = max(width / max(height, 1.0), height / max(width, 1.0))
-        if aspect > self.mask_aspect_ratio_max:
-            return None
-
-        points_cam, valid_ratio = self._mask_to_points(depth, depth_mask, info_msg)
-        if valid_ratio < self.depth_valid_ratio_min or len(points_cam) < 20:
-            if depth_mask is not cleaned:
-                points_cam, valid_ratio = self._mask_to_points(depth, cleaned, info_msg)
-            if valid_ratio < self.depth_valid_ratio_min or len(points_cam) < 20:
-                return None
-
-        points_base = self._transform_points(points_cam, t_mat)
-        points_base = self._filter_points(points_base)
-        if len(points_base) < 10:
-            return None
-
-        p_low = np.percentile(points_base, 5, axis=0)
-        p_high = np.percentile(points_base, 95, axis=0)
-        center = (p_low + p_high) / 2.0
-        size = np.maximum(p_high - p_low + 0.02, 1e-3)
-        bbox = [
-            float(center[0]),
-            float(center[1]),
-            float(center[2]),
-            float(size[0]),
-            float(size[1]),
-            float(size[2]),
-            0.0,
-        ]
-
-        occ = float(np.clip(1.0 - (cleaned.sum() / max(raw_area, 1)), 0.0, 1.0))
-        center_dist = float(np.linalg.norm(center))
-        if label != "person" and center_dist > float(self.max_non_person_distance_m):
-            return None
-        graspable = (occ <= self.occlusion_ratio_max_for_grasp) and (not is_stale)
-        return DetectionCandidate(
-            bbox=bbox,
-            score=float(score),
-            label=label,
-            occlusion_ratio=occ,
-            graspable=graspable,
-        )
-
-    def _compute_cleaned_mask(
-        self,
-        mask: np.ndarray,
-        person_mask: np.ndarray,
-    ) -> np.ndarray | None:
-        raw_area = int(mask.sum())
-        if raw_area < self.mask_area_min_px:
-            return None
-
-        total_pixels = mask.shape[0] * mask.shape[1]
-        if total_pixels > 0 and raw_area / total_pixels > self.mask_area_max_ratio:
-            return None
-
-        cleaned = mask & (~person_mask)
-        if cleaned.sum() < self.mask_area_min_px:
-            return None
-        cleaned = self._largest_connected_component(cleaned)
-        if cleaned.sum() < self.mask_area_min_px:
-            return None
-        return cleaned
-
-    def _erode_mask(self, mask: np.ndarray) -> np.ndarray:
-        """对掩码做形态学腐蚀, 仅用于深度采样以抑制边界深度噪声。"""
-        if self.mask_erode_iterations <= 0 or self.mask_erode_kernel <= 0:
-            return mask
-        return cv2.erode(
-            mask.astype(np.uint8),
-            self._erode_kernel,
-            iterations=self.mask_erode_iterations,
-        ).astype(bool)
-
-    def _publish_segmentation_debug(
-        self,
-        header,
-        rgb: np.ndarray,
-        person_mask: np.ndarray,
-        cleaned_masks: list[np.ndarray],
-        accepted_count: int,
-    ):
-        overlay = rgb.copy()
-
-        if person_mask.any():
-            overlay[person_mask] = (0, 0, 255)
-
-        # 仅绘制 cleaned masks，省去 raw/depth 的 findContours 以提升性能
-        for cleaned in cleaned_masks:
-            if not cleaned.any():
-                continue
-            cleaned_u8 = cleaned.astype(np.uint8) * 255
-            contours, _ = cv2.findContours(
-                cleaned_u8,
-                cv2.RETR_EXTERNAL,
-                cv2.CHAIN_APPROX_SIMPLE,
-            )
-            cv2.drawContours(overlay, contours, -1, (255, 255, 0), 2)
-
-        blended = cv2.addWeighted(rgb, 0.55, overlay, 0.45, 0.0)
-
-        debug_text = (
-            f"accepted={accepted_count} "
-            f"tf_age={self.last_tf_age_ms:.1f}ms skew={self.last_sync_skew_ms:.1f}ms"
-        )
-        cv2.putText(
-            blended,
-            debug_text,
-            (10, 28),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
-            (255, 255, 255),
-            2,
-            cv2.LINE_AA,
-        )
-
-        msg = self.bridge.cv2_to_imgmsg(blended, encoding="bgr8")
+    def _publish_segmentation_debug(self, header, overlay: np.ndarray):
+        msg = self.bridge.cv2_to_imgmsg(overlay, encoding="bgr8")
         msg.header = header
         self.segmentation_debug_pub.publish(msg)
 
-    @staticmethod
-    def _compute_iou_3d(b1: list[float], b2: list[float]) -> float:
-        c1 = np.asarray(b1[:3], dtype=np.float32)
-        s1 = np.asarray(b1[3:6], dtype=np.float32)
-        c2 = np.asarray(b2[:3], dtype=np.float32)
-        s2 = np.asarray(b2[3:6], dtype=np.float32)
-        min1, max1 = c1 - s1 / 2.0, c1 + s1 / 2.0
-        min2, max2 = c2 - s2 / 2.0, c2 + s2 / 2.0
-        inter_min = np.maximum(min1, min2)
-        inter_max = np.minimum(max1, max2)
-        inter_size = np.maximum(0.0, inter_max - inter_min)
-        inter = float(np.prod(inter_size))
-        v1 = float(np.prod(s1))
-        v2 = float(np.prod(s2))
-        union = v1 + v2 - inter
-        if union <= 1e-9:
-            return 0.0
-        return max(0.0, min(1.0, inter / union))
-
-    def _merge_detection_candidates(
-        self,
-        detections: list[DetectionCandidate],
-    ) -> list[DetectionCandidate]:
-        if len(detections) <= 1:
-            return detections
-
-        ordered = sorted(detections, key=lambda d: d.score, reverse=True)
-        keep: list[DetectionCandidate] = []
-        used = [False] * len(ordered)
-
-        for i, base in enumerate(ordered):
-            if used[i]:
-                continue
-
-            cluster = [base]
-            used[i] = True
-            base_center = np.asarray(base.bbox[:3], dtype=np.float32)
-
-            for j in range(i + 1, len(ordered)):
-                if used[j]:
-                    continue
-                other = ordered[j]
-                center = np.asarray(other.bbox[:3], dtype=np.float32)
-                dist = float(np.linalg.norm(base_center - center))
-                iou = self._compute_iou_3d(base.bbox, other.bbox)
-                if dist <= float(self.detection_merge_dist_m) or iou >= float(
-                    self.detection_merge_iou_min
-                ):
-                    cluster.append(other)
-                    used[j] = True
-
-            if len(cluster) == 1:
-                keep.append(base)
-                continue
-
-            weights = np.asarray(
-                [max(1e-3, d.score) for d in cluster], dtype=np.float32
-            )
-            weights /= float(weights.sum())
-            centers = np.asarray([d.bbox[:3] for d in cluster], dtype=np.float32)
-            sizes = np.asarray([d.bbox[3:6] for d in cluster], dtype=np.float32)
-            merged_center = (centers * weights[:, None]).sum(axis=0)
-            merged_size = np.max(sizes, axis=0)
-            merged_score = float(max(d.score for d in cluster))
-            merged_occ = float(min(d.occlusion_ratio for d in cluster))
-            merged_graspable = any(d.graspable for d in cluster)
-            merged_label = max(cluster, key=lambda d: d.score).label
-            keep.append(
-                DetectionCandidate(
-                    bbox=[
-                        float(merged_center[0]),
-                        float(merged_center[1]),
-                        float(merged_center[2]),
-                        float(merged_size[0]),
-                        float(merged_size[1]),
-                        float(merged_size[2]),
-                        0.0,
-                    ],
-                    score=merged_score,
-                    label=merged_label,
-                    occlusion_ratio=merged_occ,
-                    graspable=merged_graspable,
-                )
-            )
-
-        return keep
-
-    @staticmethod
-    def _largest_connected_component(mask: np.ndarray) -> np.ndarray:
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            mask.astype(np.uint8), connectivity=8
-        )
-        if num_labels <= 1:
-            return mask
-        areas = stats[1:, cv2.CC_STAT_AREA]
-        largest = int(np.argmax(areas)) + 1
-        return labels == largest
-
-    def _mask_to_points(
-        self, depth_m: np.ndarray, mask: np.ndarray, info_msg: CameraInfo
-    ) -> tuple[np.ndarray, float]:
-        ys, xs = np.where(mask)
-        if len(xs) == 0:
-            return np.empty((0, 3), dtype=np.float32), 0.0
-
-        z = depth_m[ys, xs]
-        valid = np.isfinite(z) & (z > 0.0)
-        valid_ratio = float(valid.sum() / max(len(z), 1))
-        if valid.sum() == 0:
-            return np.empty((0, 3), dtype=np.float32), valid_ratio
-
-        fx = float(info_msg.k[0])
-        fy = float(info_msg.k[4])
-        cx = float(info_msg.k[2])
-        cy = float(info_msg.k[5])
-
-        u = xs[valid].astype(np.float32)
-        v = ys[valid].astype(np.float32)
-        z = z[valid].astype(np.float32)
-
-        x = (u - cx) * z / fx
-        y = (v - cy) * z / fy
-        points = np.stack([x, y, z], axis=1)
-        return points, valid_ratio
-
-    @staticmethod
-    def _transform_points(points: np.ndarray, t_mat: np.ndarray) -> np.ndarray:
-        points_h = np.hstack([points, np.ones((len(points), 1), dtype=np.float32)])
-        transformed = (t_mat @ points_h.T).T
-        return transformed[:, :3]
-
-    def _filter_points(self, points: np.ndarray) -> np.ndarray:
-        if len(points) < 10:
-            return points
-        z = points[:, 2]
-        low = np.quantile(z, self.z_trim_quantile)
-        high = np.quantile(z, 1.0 - self.z_trim_quantile)
-        mask = (z >= low) & (z <= high)
-        points = points[mask]
-        if len(points) < 10:
-            return points
-        center = points.mean(axis=0)
-        d = np.linalg.norm(points - center, axis=1)
-        d_mean = float(np.mean(d))
-        d_std = float(np.std(d))
-        if d_std < 1e-6:
-            return points
-        return points[d < (d_mean + 2.5 * d_std)]
-
-    def _maybe_reestimate_table(
-        self, depth: np.ndarray, info_msg: CameraInfo, t_mat: np.ndarray
-    ):
-        now_ns = int(self.get_clock().now().nanoseconds)
-        if now_ns - self.last_table_reestimate_ns < int(
-            self.table_reestimate_interval_s * 1e9
-        ):
-            return
-        self.last_table_reestimate_ns = now_ns
-
-        valid = np.isfinite(depth) & (depth > 0)
-        if valid.sum() < 500:
-            return
-        ys, xs = np.where(valid)
-        z = depth[ys, xs].astype(np.float32)
-        step = max(1, len(z) // 8000)
-        ys = ys[::step]
-        xs = xs[::step]
-        z = z[::step]
-
-        fx = float(info_msg.k[0])
-        fy = float(info_msg.k[4])
-        cx = float(info_msg.k[2])
-        cy = float(info_msg.k[5])
-        x = (xs.astype(np.float32) - cx) * z / fx
-        y = (ys.astype(np.float32) - cy) * z / fy
-        pts = np.stack([x, y, z], axis=1)
-        pts = self._transform_points(pts, t_mat)
-        if len(pts) < 100:
-            return
-
-        z_all = pts[:, 2]
-        candidate = float(np.quantile(z_all, 0.06))
-        inlier = np.abs(z_all - candidate) < 0.015
-        inlier_ratio = float(inlier.mean())
-        if inlier_ratio >= self.table_reestimate_min_inlier_ratio:
-            self.table_z = candidate
-            self._info(
-                f"table_z 更新为 {self.table_z:.4f} (inlier_ratio={inlier_ratio:.2f})"
-            )
-        else:
-            self._warn_throttled(
-                f"table_z 重估失败，沿用旧值 {self.table_z:.4f} (inlier_ratio={inlier_ratio:.2f})",
-                key="table_fail",
-                period_frames=int(self.table_warn_every),
-            )
+    def _update_table_from_pipeline(self, det_result):
+        table_z = getattr(det_result, "table_z", None)
+        if table_z is not None:
+            self.table_z = float(table_z)
 
     def _warn_throttled(self, msg: str, key: str, period_frames: int):
         count = self._warn_counters.get(key, 0) + 1

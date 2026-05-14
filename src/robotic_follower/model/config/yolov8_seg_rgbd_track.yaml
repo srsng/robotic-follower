@@ -1,40 +1,87 @@
-segmenter:
-  type: yolov8_seg
-  model_path: yolov8s-seg.pt
-  conf_threshold: 0.35
-  iou_threshold: 0.50
+detector:
+  name: yolov8_seg_projection
+  type: seg_projection
+  segmenter:
+    type: yolov8_seg
+    model_path: yolov8s-seg.pt
+    conf_threshold: 0.35
+    iou_threshold: 0.50
+  params:
+    depth_valid_ratio_min: 0.35
+    mask_area_min_px: 200
+    mask_area_max_ratio: 0.40
+    z_trim_quantile: 0.08
+    detection_merge_dist_m: 0.10
+    detection_merge_iou_min: 0.18
+    max_non_person_distance_m: 1.2
+    occlusion_ratio_max_for_grasp: 0.45
+    exclude_labels:
+      - dining table
+      - couch
+      - bed
+      - refrigerator
+      - oven
+      - microwave
+      - sink
+      - clock
+      - vase
+      - potted plant
+  pipeline:
+    preprocess:
+      - type: mask_clean
+        params:
+          mask_area_min_px: 200
+          mask_area_max_ratio: 0.40
+          exclude_labels:
+            - dining table
+            - couch
+            - bed
+            - refrigerator
+            - oven
+            - microwave
+            - sink
+            - clock
+            - vase
+            - potted plant
+      - type: mask_erode
+        params:
+          mask_erode_kernel: 3
+          mask_erode_iterations: 1
+    process:
+      - type: segment_and_project
+        params:
+          depth_valid_ratio_min: 0.35
+          mask_aspect_ratio_max: 6.0
+          z_trim_quantile: 0.08
+          max_non_person_distance_m: 1.2
+          occlusion_ratio_max_for_grasp: 0.45
+    postprocess:
+      - type: distance_gate
+        params:
+          max_non_person_distance_m: 1.2
+      - type: detection_merge
+        params:
+          detection_merge_dist_m: 0.10
+          detection_merge_iou_min: 0.18
+      - type: table_estimate
+        params:
+          table_z: 0.0
+          table_margin_m: 0.01
+          table_reestimate_interval_s: 2.0
+          table_reestimate_min_inlier_ratio: 0.35
 
-params:
-  depth_valid_ratio_min: 0.35
-  mask_area_min_px: 200
-  mask_area_max_ratio: 0.40
-  z_trim_quantile: 0.08
-  table_z: 0.0
-  table_margin_m: 0.01
-  table_reestimate_interval_s: 2.0
-  table_reestimate_min_inlier_ratio: 0.35
-  tf_stale_threshold_ms: 80
-  sync_skew_threshold_ms: 30
-  tf_fallback_warn_every: 45
-  table_warn_every: 45
-  sync_warn_every: 45
-  association_dist_gate_m: 0.50
-  detection_merge_dist_m: 0.10
-  detection_merge_iou_min: 0.18
-  duplicate_track_dist_m: 0.15
-  max_non_person_distance_m: 1.2
-  fallback_to_source_frame_when_tf_disconnected: true
-  max_age: 30
-  min_hits: 1
-  occlusion_ratio_max_for_grasp: 0.45
-  exclude_labels:
-    - dining table
-    - couch
-    - bed
-    - refrigerator
-    - oven
-    - microwave
-    - sink
-    - clock
-    - vase
-    - potted plant
+tracker:
+  type: kalman3d
+  params:
+    association_dist_gate_m: 0.50
+    duplicate_track_dist_m: 0.15
+    max_age: 30
+    min_hits: 1
+
+node:
+  params:
+    tf_stale_threshold_ms: 80
+    sync_skew_threshold_ms: 30
+    tf_fallback_warn_every: 45
+    sync_warn_every: 45
+    fallback_to_source_frame_when_tf_disconnected: true

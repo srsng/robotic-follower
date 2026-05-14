@@ -6,3 +6,6 @@ from .euclidean_cluster import *  # noqa: F403
 from .ground_detector import *  # noqa: F403
 from .postprocessors import *  # noqa: F403
 from .preprocessors import *  # noqa: F403
+from .rgbd_postprocessors import *  # noqa: F403
+from .rgbd_preprocessors import *  # noqa: F403
+from .rgbd_processors import *  # noqa: F403

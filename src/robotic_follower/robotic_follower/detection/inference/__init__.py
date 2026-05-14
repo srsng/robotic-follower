@@ -5,6 +5,7 @@ from robotic_follower.util.log import log
 from .__base__ import Detector
 from .algo import AlgoDetector
 from .mmdet3d import Mmdet3dDetector
+from .seg_projection import SegProjectionDetector
 
 
 def create_from_config(
@@ -30,6 +31,8 @@ def create_from_config(
             return Mmdet3dDetector.create_from_config(config, parent_node)
         case "algo":
             return AlgoDetector.create_from_config(config, parent_node)
+        case "seg_projection":
+            return SegProjectionDetector.create_from_config(config, parent_node)
         case _:
             log("fatal", f"无效的 检测器type: {detector_type}", parent_node)
             return None
@@ -39,5 +42,6 @@ __all__ = [
     "Detector",
     "AlgoDetector",
     "Mmdet3dDetector",
+    "SegProjectionDetector",
     "create_from_config",
 ]
